@@ -1,9 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const sharp = require('sharp');
+const repoRoot = path.resolve(__dirname, '..');
 
 async function main() {
-  const source = path.join(__dirname, 'assets', 'taskbar-select.svg');
+  const source = path.join(repoRoot, 'assets', 'taskbar-select.svg');
   const sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
   const images = [];
   for (const size of sizes) {
@@ -43,8 +44,8 @@ async function main() {
     directory.writeUInt32LE(offset, entry + 12);
     offset += images[i].length;
   });
-  fs.writeFileSync(path.join(__dirname, 'assets', 'TaskbarSelect.ico'), Buffer.concat([directory, ...images]));
-  await sharp(source, { density: 384 }).resize(256, 256).png().toFile(path.join(__dirname, 'assets', 'taskbar-select-preview.png'));
+  fs.writeFileSync(path.join(repoRoot, 'assets', 'TaskbarSelect.ico'), Buffer.concat([directory, ...images]));
+  await sharp(source, { density: 384 }).resize(256, 256).png().toFile(path.join(repoRoot, 'assets', 'taskbar-select-preview.png'));
   console.log(`Built icon at ${sizes.join(', ')} pixels.`);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

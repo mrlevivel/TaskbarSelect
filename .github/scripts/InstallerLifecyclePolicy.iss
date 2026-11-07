@@ -12,7 +12,7 @@ DisableProgramGroupPage=yes
 OutputBaseFilename=InstallerLifecyclePolicyFixture
 
 [Code]
-#include "..\..\InstallerLifecycle.iss"
+#include "..\..\installer\InstallerLifecycle.iss"
 
 procedure ExitProcess(Code: Integer);
   external 'ExitProcess@kernel32.dll stdcall';

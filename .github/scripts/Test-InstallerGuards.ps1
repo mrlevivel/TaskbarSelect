@@ -167,8 +167,8 @@ Reject { Test-InstallerLegacyPersistentProfile -PreviousVersion '1.0.0-beta.12-p
 $installerRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $standaloneInstaller = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Test-Installer.ps1'))
 Check ($standaloneInstaller -cmatch "if \(\`$version -cin @\('1\.0\.0-beta\.12', '1\.0\.0-beta\.13', '1\.0\.0-beta\.14', '1\.0\.0-beta\.15', '1\.0\.0-beta\.16', '1\.0\.0-beta\.17', '1\.0\.0-beta\.18'\)\) \{\s*\`$baselineSpec = Get-InstallerLifecycleBaseline -Version \`$version") 'The standalone production installer gate also requires the pinned released predecessor'
-$installerSource = [IO.File]::ReadAllText((Join-Path $installerRoot 'installer.iss'))
-$installerPolicy = [IO.File]::ReadAllText((Join-Path $installerRoot 'InstallerLifecycle.iss'))
+$installerSource = [IO.File]::ReadAllText((Join-Path $installerRoot 'installer\installer.iss'))
+$installerPolicy = [IO.File]::ReadAllText((Join-Path $installerRoot 'installer\InstallerLifecycle.iss'))
 Assert-InstallerLifecycleSource -Installer $installerSource -Policy $installerPolicy
 Check $true 'Production installer wires strict predecessor selection and fail-closed cleanup gates'
 Reject { Assert-InstallerLifecycleSource -Installer $installerSource.Replace('if PrepareInstalledApp() then', "if StopInstalledApp('--restore', True) then") -Policy $installerPolicy } 'A legacy restore shortcut cannot bypass persistent cleanup'

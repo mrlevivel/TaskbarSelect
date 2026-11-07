@@ -6,6 +6,8 @@ param(
     [string]$ScheduledBootstrapPath
 )
 $ErrorActionPreference = 'Stop'
+$repoRoot = [IO.Path]::GetDirectoryName($PSScriptRoot)
+$nativeDirectory = Join-Path $repoRoot 'native'
 Import-Module -Name (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') -Global -Force -ErrorAction Stop
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if ($ScheduledOnly -and $ScheduledBootstrapPath) { throw 'The scheduled-only entry cannot embed another native entry.' }
@@ -21,7 +23,7 @@ if (-not $ScheduledOnly) {
 $null = New-Item -ItemType Directory -Path $OutputDirectory -Force
 $payload = [IO.File]::ReadAllBytes($PayloadPath)
 if ($payload.Length -eq 0 -or $payload.Length -gt 16777216) { throw 'The managed administrator payload must be nonempty and bounded to 16 MiB.' }
-$configurationPath = Join-Path $PSScriptRoot 'AdministratorPayload.config'
+$configurationPath = Join-Path $nativeDirectory 'AdministratorPayload.config'
 $configuration = [IO.File]::ReadAllBytes($configurationPath)
 $utf8 = New-Object Text.UTF8Encoding($false, $true)
 $null = $utf8.GetString($configuration)
@@ -56,7 +58,7 @@ try {
     $writer.WriteLine('static const unsigned long AdministratorConfigLength = sizeof(AdministratorConfigBytes);')
     $writer.WriteLine('#endif')
 } finally { $writer.Dispose() }
-$manifest = Join-Path $PSScriptRoot 'AdministratorBootstrap.manifest'
+$manifest = Join-Path $nativeDirectory 'AdministratorBootstrap.manifest'
 [xml]$manifestXml = [IO.File]::ReadAllText($manifest)
 $manager = New-Object Xml.XmlNamespaceManager($manifestXml.NameTable)
 $manager.AddNamespace('asm', 'urn:schemas-microsoft-com:asm.v3')
@@ -72,7 +74,7 @@ if ($fileVersion -cne $payloadMetadata.FileVersion -or $productVersion -cnotmatc
     throw 'The managed payload must have explicit safe file/product version metadata.'
 }
 $friendlyTitle = 'Taskbar Select administrator support'
-$icon = Join-Path $PSScriptRoot 'assets\TaskbarSelect.ico'
+$icon = Join-Path $repoRoot 'assets\TaskbarSelect.ico'
 if (-not (Test-Path -LiteralPath $icon -PathType Leaf)) { throw 'The native administrator bootstrap icon is missing.' }
 $resourceManifest = $manifest.Replace('\', '/')
 $resourceIcon = $icon.Replace('\', '/')
@@ -133,7 +135,7 @@ try {
     & $zig @resourceArguments
     if ($LASTEXITCODE -ne 0) { throw "Native manifest compilation failed: $LASTEXITCODE" }
     $nativeArguments = @('cc', '-target', 'x86_64-windows-gnu', '-Os', '-nostdlib', '-fno-builtin', '-fno-stack-protector', '-Wall', '-Wextra', '-Werror',
-        '-isystem', $windowsHeaders, ('-I' + $OutputDirectory), (Join-Path $PSScriptRoot 'AdministratorBootstrap.c'), $compiledResource,
+        '-isystem', $windowsHeaders, ('-I' + $OutputDirectory), (Join-Path $nativeDirectory 'AdministratorBootstrap.c'), $compiledResource,
         '-Wl,--entry,BootstrapEntry', '-Wl,--subsystem,windows', '-Wl,--nxcompat', '-Wl,--dynamicbase', '-lkernel32', '-o', $bootstrap)
     if ($ScheduledOnly) { $nativeArguments += '-DTASKBARSELECT_SCHEDULED_ONLY=1' }
     & $zig @nativeArguments

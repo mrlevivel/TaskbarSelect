@@ -9,7 +9,7 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed: $LASTEXITCODE" }
 $executable = Join-Path $artifacts 'TaskbarSelect.exe'
 $metadata = [Diagnostics.FileVersionInfo]::GetVersionInfo($executable)
 $version = $metadata.ProductVersion
-$installerLines = Get-Content -LiteralPath (Join-Path $root 'installer.iss')
+$installerLines = Get-Content -LiteralPath (Join-Path $root 'installer\installer.iss')
 $installerVersion = Get-PackageInstallerVersion -Lines $installerLines
 $installerFileVersion = Get-PackageInstallerVersion -Lines $installerLines -Field AppFileVersion
 $notesHeading = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -TotalCount 1
@@ -110,7 +110,7 @@ if (-not $SkipInstaller) {
     if (-not $iscc) { throw 'Inno Setup 6 was not found. Use -SkipInstaller for a portable-only package.' }
     $isccPath = $iscc.Source
     if (-not $isccPath) { $isccPath = $iscc.FullName }
-    & $isccPath (Join-Path $root 'installer.iss')
+    & $isccPath (Join-Path $root 'installer\installer.iss')
     if ($LASTEXITCODE -ne 0) { throw "Installer build failed: $LASTEXITCODE" }
     $installer = Join-Path $dist ($expectedPrefix + 'Setup.exe')
     if (-not (Test-Path -LiteralPath $installer)) { throw 'The expected installer was not produced.' }

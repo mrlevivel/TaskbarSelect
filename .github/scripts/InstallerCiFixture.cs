@@ -26,7 +26,7 @@ internal static partial class AdministratorCiLaunchProbe
         ".github/scripts/Installer-Guards.ps1", ".github/scripts/Test-InstallerGuards.ps1",
         ".github/scripts/Test-InstallerPolicy.ps1", ".github/scripts/InstallerLifecyclePolicy.iss",
         ".github/scripts/Test-RecoveryGuards.ps1", ".github/scripts/Test-InstallerRefusal.ps1",
-        ".github/scripts/Package-Guards.ps1", "InstallerLifecycle.iss", "installer.iss",
+        ".github/scripts/Package-Guards.ps1", "installer/InstallerLifecycle.iss", "installer/installer.iss",
         "docs/package/README.md", "RELEASE_NOTES.md", "TESTING.md", "SECURITY.md",
         "CHANGELOG.md", "LICENSE", "assets/ARTWORK.md", "artifacts/TaskbarSelect.exe",
         "dist/SHA256SUMS.txt"

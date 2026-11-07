@@ -33,9 +33,9 @@ foreach ($policyFixture in $policyFixtures.GetEnumerator()) {
 [IO.File]::WriteAllText((Join-Path $policyMetadata 'non-pe.txt'), 'This is an owned non-executable fixture.')
 $policyCompiler = Get-Command iscc.exe -ErrorAction Stop
 $null = Invoke-OwnedCompiler -Compiler $policyCompiler.Source -CompilerArguments @(('/O"' + $policyOutput + '"'), ('"' + (Join-Path $PSScriptRoot 'InstallerLifecyclePolicy.iss') + '"')) -Label 'pascal-policy' -Source (Join-Path $PSScriptRoot 'InstallerLifecyclePolicy.iss') -EvidenceDirectory $policyEvidence
-$policyInstallerSource = [IO.File]::ReadAllText((Join-Path $policyRepo 'installer.iss'))
+$policyInstallerSource = [IO.File]::ReadAllText((Join-Path $policyRepo 'installer\installer.iss'))
 $policyCode = $policyInstallerSource.Substring($policyInstallerSource.IndexOf('[Code]', [StringComparison]::Ordinal))
-$policyCode = $policyCode.Replace('#include "InstallerLifecycle.iss"', ('#include "' + (Join-Path $policyRepo 'InstallerLifecycle.iss') + '"'))
+$policyCode = $policyCode.Replace('#include "InstallerLifecycle.iss"', ('#include "' + (Join-Path $policyRepo 'installer\InstallerLifecycle.iss') + '"'))
 $policyCompileHeader = @'
 #define AppVersion "__POLICY_PRODUCTION_VERSION__"
 #define AppExeName "TaskbarSelect.exe"
@@ -65,7 +65,7 @@ if ($policyPeOffset -lt 64 -or $policyPeOffset -gt $policyImage.Length - 6 -or
 $policyLog = Join-Path $policyOutput 'policy.log'
 $policyReceipt = [ordered]@{
     status = 'failed'; sourceSha = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID
-    policySha256 = (Get-FileHash -LiteralPath (Join-Path $policyRepo 'InstallerLifecycle.iss') -Algorithm SHA256).Hash.ToLowerInvariant()
+    policySha256 = (Get-FileHash -LiteralPath (Join-Path $policyRepo 'installer\InstallerLifecycle.iss') -Algorithm SHA256).Hash.ToLowerInvariant()
     fixtureSourceSha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'InstallerLifecyclePolicy.iss') -Algorithm SHA256).Hash.ToLowerInvariant()
     fixtureExeSha256 = (Get-FileHash -LiteralPath $policyExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
     productionCodeCompilePassed = $true; productionCodeFixtureExecuted = $false

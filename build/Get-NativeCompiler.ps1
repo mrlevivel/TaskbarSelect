@@ -1,5 +1,6 @@
 param([string]$CacheDirectory)
 $ErrorActionPreference = 'Stop'
+$repoRoot = [IO.Path]::GetDirectoryName($PSScriptRoot)
 foreach ($module in @('Microsoft.PowerShell.Utility')) {
     Import-Module -Name (Join-Path $PSHOME ("Modules\$module\$module.psd1")) -Global -Force -ErrorAction Stop
 }
@@ -14,7 +15,7 @@ function Write-ProvisionStage([string]$Stage) {
     Write-Host ('Native compiler: ' + $Stage + ' (' + [Math]::Round($provisionClock.Elapsed.TotalSeconds, 1) + 's).')
 }
 if (-not $CacheDirectory) {
-    $existing = Join-Path ([IO.Path]::GetDirectoryName($PSScriptRoot)) 'validation\tools\zig'
+    $existing = Join-Path ([IO.Path]::GetDirectoryName($repoRoot)) 'validation\tools\zig'
     if ($env:TASKBARSELECT_NATIVE_TOOLCHAIN_CACHE) { $CacheDirectory = $env:TASKBARSELECT_NATIVE_TOOLCHAIN_CACHE }
     elseif (Test-Path -LiteralPath (Join-Path $existing 'zig-0.15.2.zip') -PathType Leaf) { $CacheDirectory = $existing }
     elseif ($env:RUNNER_TEMP) { $CacheDirectory = Join-Path $env:RUNNER_TEMP 'TaskbarSelect-native-toolchain' }
@@ -23,7 +24,7 @@ if (-not $CacheDirectory) {
 }
 if (-not [IO.Path]::IsPathRooted($CacheDirectory)) { throw 'The native compiler cache requires an absolute path.' }
 $CacheDirectory = [IO.Path]::GetFullPath($CacheDirectory)
-$sourceDirectory = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+$sourceDirectory = [IO.Path]::GetFullPath($repoRoot).TrimEnd('\')
 if ($CacheDirectory.TrimEnd('\').Equals($sourceDirectory, [StringComparison]::OrdinalIgnoreCase) -or
     $CacheDirectory.StartsWith($sourceDirectory + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The native compiler cache must be outside the source checkout.'

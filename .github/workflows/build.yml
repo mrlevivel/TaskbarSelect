@@ -131,7 +131,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $nativeCache = Join-Path $env:RUNNER_TEMP 'TaskbarSelect-native-toolchain'
-          $nativeCompiler = .\Get-NativeCompiler.ps1 -CacheDirectory $nativeCache
+          $nativeCompiler = .\build\Get-NativeCompiler.ps1 -CacheDirectory $nativeCache
           if (-not (Test-Path -LiteralPath $nativeCompiler -PathType Leaf)) { throw 'Verified native compiler was not produced.' }
           ('TASKBARSELECT_NATIVE_TOOLCHAIN_CACHE=' + $nativeCache) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build, test and package

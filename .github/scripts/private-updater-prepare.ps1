@@ -352,10 +352,11 @@ foreach($name in $assembly.GetManifestResourceNames()){
     $resources+=('/resource:'+ $resource+','+$name);$index++
 }
 $compiler=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe';$wpf=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\WPF'
-$sources=@(Get-ChildItem -LiteralPath $donor -Filter '*.cs' -File|Where-Object Name -CNE 'AssemblyInfo.cs'|ForEach-Object {$_.FullName})
+$sourceDirectories=@((Join-Path $donor 'src\TaskbarSelect'),(Join-Path $donor 'tests\TaskbarSelect'))
+$sources=@(Get-ChildItem -LiteralPath $sourceDirectories -Filter '*.cs' -File|Where-Object Name -CNE 'AssemblyInfo.cs'|Sort-Object Name|ForEach-Object {$_.FullName})
 Require ($sources.Count -gt 100 -and $sources.Count -lt 400) 'Bounded complete candidate managed source set required.'
-$sourceHashes=@($sources|ForEach-Object {[ordered]@{file=[IO.Path]::GetFileName($_);sha256=Hash $_}})
-$sourceForm=Join-Path $donor 'AppUpdateForm.cs'
+$sourceHashes=@($sources|ForEach-Object {[ordered]@{file=$_.Substring($donor.Length+1).Replace('\','/');sha256=Hash $_}})
+$sourceForm=Join-Path $donor 'src\TaskbarSelect\AppUpdateForm.cs'
 $formText=[Text.UTF8Encoding]::new($false,$true).GetString([IO.File]::ReadAllBytes($sourceForm))
 $productionFactory=': this(stateController, AppUpdateService.CreateDefault()) { }'
 $fixtureFactory=': this(stateController, PrivateUpdateFixture.CreateUpdateService()) { }'
@@ -366,7 +367,7 @@ $fixtureSources=@($sources|Where-Object {$_ -cne $sourceForm})+@($adaptedForm)
 $compilerArguments=@('/nologo','/target:winexe','/platform:x64','/optimize+','/warnaserror+','/main:TaskbarSelect.PrivateUpdateFixture',
     '/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/r:System.Management.dll',
     ('/r:'+(Join-Path $wpf 'UIAutomationClient.dll')),('/r:'+(Join-Path $wpf 'UIAutomationTypes.dll')),('/r:'+(Join-Path $wpf 'WindowsBase.dll')),
-    ('/win32icon:'+(Join-Path $donor 'assets\TaskbarSelect.ico')),('/win32manifest:'+(Join-Path $donor 'app.manifest')),('/out:'+(Join-Path $inputs 'PrivateUpdateFixture.exe')))
+    ('/win32icon:'+(Join-Path $donor 'assets\TaskbarSelect.ico')),('/win32manifest:'+(Join-Path $donor 'src\TaskbarSelect\app.manifest')),('/out:'+(Join-Path $inputs 'PrivateUpdateFixture.exe')))
 & $compiler @compilerArguments @resources @fixtureSources (Join-Path $inputs 'private-updater-host.cs') (Join-Path $inputs 'private-updater-assembly.cs')
 Require ($LASTEXITCODE -eq 0 -and [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $inputs 'PrivateUpdateFixture.exe')).ProductVersion -ceq '1.0.0-beta.17') 'Labelled source-built predecessor compilation failed.'
 & $compiler /nologo /target:exe /platform:x64 /optimize+ /warnaserror+ /r:System.Management.dll /r:System.Web.Extensions.dll ('/out:'+(Join-Path $inputs 'SetupWizardSupervisor.exe')) (Join-Path $inputs 'private-updater-wizard.cs')

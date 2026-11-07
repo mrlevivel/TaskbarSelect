@@ -1,9 +1,10 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const sharp = require('sharp');
+const repoRoot = path.resolve(__dirname, '..');
 
 async function main() {
-  const folder = path.join(__dirname, 'assets', 'toolbar');
+  const folder = path.join(repoRoot, 'assets', 'toolbar');
   // Keep the embedded resource names stable while using the approved Rounded sources.
   const icons = new Map([
     ['undo-2', 'undo'], ['refresh-cw', 'refresh'], ['pause', 'pause'],
