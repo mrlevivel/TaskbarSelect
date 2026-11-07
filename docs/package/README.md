@@ -1,6 +1,6 @@
 # Taskbar Select
 
-> **Beta.18 private release candidate for Windows 11 x64.** Verify the supplied archive against its matching checksum before use.
+> **Beta 18 for Windows 11 x64.** Download from the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) and verify the package against its matching checksum before use.
 
 Choose which secondary monitors show the native Windows taskbar, and optionally bring windows to the monitor whose taskbar you use.
 
@@ -32,7 +32,7 @@ This explicit profile keeps trial preferences separate and disables Startup chan
 
 The shared desktop lock still permits only one taskbar controller. Stop the trial successfully before returning to your installed copy. The portable archive does not contain the maintainer's integration-folder launchers.
 
-Builds are unsigned and SmartScreen may warn. Checksums establish integrity, not publisher identity. Confirm the source before running; if security software blocks it, stop and check with the person providing the build. The beta.18 candidate files are **TaskbarSelect-1.0.0-beta.18-Setup.exe**, **TaskbarSelect-1.0.0-beta.18-portable.zip** and **SHA256SUMS.txt**.
+Builds are unsigned and SmartScreen may warn. Checksums establish integrity, not publisher identity. Confirm the source before running; if security software blocks it, stop and verify the source or report the problem. The beta 18 downloads are **TaskbarSelect-1.0.0-beta.18-Setup.exe**, **TaskbarSelect-1.0.0-beta.18-portable.zip** and **SHA256SUMS.txt**.
 
 Installed and portable copies share your saved choices and Startup entry. Before switching copies, choose **Restore and exit** on the running app and confirm it stopped; closing its settings window is insufficient. Upgrades preserve choices. For a fresh-install trial or uninstall, first copy `%LOCALAPPDATA%\TaskbarSelect\settings.json` and any **Taskbar Select.lnk** from `shell:startup` into a private backup, noting the shortcut target and Windows Startup-app state. Do not delete recovery files. A separate Windows user or test PC gives clean defaults without changing your usual profile.
 
@@ -44,7 +44,7 @@ Open **Settings > Check for updates** to check for a newer official beta or stab
 
 In-app installation requires the installed production copy launched normally, without **Run as administrator**. Portable and isolated copies can check but must update manually through the fixed official releases link. If administrator support is enabled or saved, turn its existing Settings switch Off, approve Windows if requested and wait for confirmed Off before installing. A cancellation, incomplete shutdown or retained approval blocks the upgrade. Turn support On and approve Windows again in a changed build if wanted.
 
-The GitHub repository is private. The check uses anonymous GitHub access without account tokens, so **updates unavailable is expected** even if your signed-in browser can view releases. For a candidate upgrade, run the reviewed Setup supplied by the maintainer. Do not supply credentials or change security settings.
+The updater reads published releases through anonymous GitHub access. A private repository is unavailable to it even if your signed-in browser can view that repository; draft releases are not offered as updates. During a private trial, run the reviewed Setup provided by the maintainer. Do not supply credentials or change security settings.
 
 See the bundled `TESTING.md` for the current upgrade verification scope.
 
@@ -56,7 +56,7 @@ Enable **Bring windows to the taskbar I use** under **All displays** to try move
 
 **Pause moves** leaves taskbar choices active. **Undo** reverses a recent move, layout or minimize performed with Taskbar Select's minimize shortcut. Undoing a maximized move restores the previous display and the window's saved floating size and position. The configurable Undo shortcut defaults to **Ctrl + Shift + Backspace** for new profiles. Existing saved choices, including Ctrl + Alt + Backspace or Off, are preserved.
 
-**Shortcuts > Window movement** lists connected displays and assigns Ctrl+Shift+1â€“4 to Displays 1â€“4 by default. Assign a shortcut for any additional display. Saved shortcuts follow Windows display numbers and are kept when a display disconnects. Existing Undo bindings take priority over colliding defaults, and each row reports registration conflicts. **Allow moving fullscreen apps** is off by default and applies to every movement path. Fullscreen requests use full monitor bounds with a bounded observation and safe Undo. Rocket League works in Borderless and refuses monitor moves in exclusive Fullscreen with both Taskbar Select and Windows' monitor shortcut.
+**Shortcuts > Window movement** lists connected displays and assigns Ctrl+Shift+1–4 to Displays 1–4 by default. Assign a shortcut for any additional display. Saved shortcuts follow Windows display numbers and are kept when a display disconnects. Existing Undo bindings take priority over colliding defaults, and each row reports registration conflicts. **Allow moving fullscreen apps** is off by default and applies to every movement path. Fullscreen requests use full monitor bounds with a bounded observation and safe Undo. Rocket League works in Borderless and refuses monitor moves in exclusive Fullscreen with both Taskbar Select and Windows' monitor shortcut.
 
 An explicitly selected test profile keeps settings and recovery separate, disables Startup changes and production uninstall, and uses separate stop/show events. It still shares the desktop-management lock with regular copies; only one copy may manage taskbars at a time.
 

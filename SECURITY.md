@@ -2,7 +2,7 @@
 
 ## Current candidate
 
-Taskbar Select beta 18 is prepared for a public Windows 11 x64 beta. It is unsigned. The [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) records the exact package and validation scope.
+Taskbar Select beta 18 is a Windows 11 x64 beta. It is unsigned. The [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) records the exact package and validation scope.
 
 Taskbar Select normally runs with standard permissions. Optional Administrator support uses a separately approved helper and remembers approval for the exact user, profile and build. Search launches retain normal permissions when the app is launched normally. An already elevated caller's token is inherited, so open the app normally for ordinary use and updates.
 

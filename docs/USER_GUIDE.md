@@ -1,6 +1,6 @@
 # Taskbar Select User Guide
 
-> **Beta.18 private release candidate for Windows 11 x64.** See the [testing scope](../TESTING.md) for executed checks and remaining qualification.
+> **Beta 18 for Windows 11 x64.** See the [testing scope](../TESTING.md) and [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for executed checks and known limitations.
 
 This guide covers connected-display shortcuts, relative sizing for snapped and floating windows, and maximized-move Undo alongside existing features. Normal launch uses the production profile. The **isolated test** label appears only with an explicit trial profile.
 
@@ -8,9 +8,9 @@ This guide covers connected-display shortcuts, relative sizing for snapped and f
 
 ## Installing the Beta
 
-The beta 18 candidate is prepared in this repository for owner review. Obtain reviewed files from its release page when available.
+Download beta 18 from the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18). Choose Setup or the portable package; GitHub's source-code archives contain the project rather than a ready-to-run app.
 
-1. Obtain **TaskbarSelect-1.0.0-beta.18-Setup.exe** and the matching **SHA256SUMS.txt** from the maintainer.
+1. Download **TaskbarSelect-1.0.0-beta.18-Setup.exe** and the matching **SHA256SUMS.txt** from that release page.
 2. Compare the installer's SHA-256 with the matching line in `SHA256SUMS.txt`. In PowerShell opened in the download folder, run `Get-FileHash .\TaskbarSelect-1.0.0-beta.18-Setup.exe -Algorithm SHA256`.
 3. Run Setup and keep the default per-user location unless you have a reason to choose another. No administrator access is needed. Open **Taskbar Select** from the Start menu after installation.
 
@@ -196,7 +196,7 @@ The per-user installer creates a searchable Start menu shortcut and runs at norm
 
 In-app installation is available only from the verified installed production app opened normally from Windows, without **Run as administrator**. A portable or isolated copy can check releases but cannot replace the installed app; use **View releases on GitHub** and update manually. Downloading and opening Setup are separate explicit actions. The app and installer remain unsigned, so Windows may warn or block them. Stop and verify the source if blocked; do not disable security settings.
 
-The GitHub repository is private, so **updates unavailable is expected** in the anonymous updater. Your signed-in browser can access the releases available to your account. For a candidate upgrade, run the reviewed Setup supplied by the maintainer. The updater does not use that browser session, ask for a password or accept a GitHub token. Public-feed and end-to-end public update behavior remain separate checks.
+The updater reads published releases through anonymous GitHub access. A private repository is unavailable to it even if your signed-in browser can view that repository; draft releases are not offered as updates. While a build is being reviewed privately, use the reviewed Setup provided by the maintainer. The updater does not use your browser session, ask for a password or accept a GitHub token. See the release page for the exact public-feed and updater validation scope.
 
 See the [beta.18 testing scope](../TESTING.md) for current package and guided-upgrade qualification.
 
