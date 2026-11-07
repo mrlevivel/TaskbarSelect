@@ -1,0 +1,65 @@
+name: Seed fixed upgrade baseline
+
+on:
+  push:
+    branches: [codex/beta16-baseline-seed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.repository == 'mrlevivel/TaskbarSelect' && github.event.repository.private == true && github.ref == 'refs/heads/codex/beta16-baseline-seed'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    # GitHub requires push access to read a draft release. This isolated job
+    # only downloads fixed files and uploads a hash-verified CI artifact.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Download only the exact draft baseline files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repository = 'mrlevivel/TaskbarSelect'
+          $raw = gh api "repos/$repository" --jq '{id,full_name,private}'
+          if ($LASTEXITCODE -ne 0) { throw 'Repository identity read failed.' }
+          $repo = $raw | ConvertFrom-Json
+          if ($repo.id -ne 1449520856 -or $repo.full_name -cne $repository -or -not $repo.private) { throw 'Exact private staging repository required.' }
+          $raw = gh api "repos/$repository/releases/437690025" --jq '{id,tag_name,draft,assets:[.assets[]|{id,name,size,digest}]}'
+          if ($LASTEXITCODE -ne 0) { throw 'Fixed baseline draft read failed.' }
+          $release = $raw | ConvertFrom-Json
+          if ($release.id -ne 437690025 -or $release.tag_name -cne 'ci-upgrade-baseline-beta16' -or -not $release.draft -or $release.assets.Count -ne 2) { throw 'Fixed two-file baseline draft required.' }
+          $expected = @(
+            @{ id = 721226930; name = 'TaskbarSelect-1.0.0-beta.16-Setup.exe'; size = 3362501; sha256 = 'f8bc6de104f18853a91746b156307f797367d3a55110379a9768a30ae5ae413e' },
+            @{ id = 721226931; name = 'SHA256SUMS.txt'; size = 213; sha256 = '82c80f4601e70dd495ffdea1efa0e35d9a9de46a6f77bf2ac0d31987023ef7d7' }
+          )
+          foreach ($file in $expected) {
+            $matches = @($release.assets | Where-Object { $_.id -eq $file.id -and $_.name -ceq $file.name -and $_.size -eq $file.size -and $_.digest -ceq ('sha256:' + $file.sha256) })
+            if ($matches.Count -ne 1) { throw 'Baseline asset identity changed.' }
+          }
+          $directory = Join-Path $PWD 'artifacts/beta16-baseline'
+          if (Test-Path -LiteralPath $directory) { throw 'Fresh fixture directory required.' }
+          gh release download ci-upgrade-baseline-beta16 --repo $repository --pattern TaskbarSelect-1.0.0-beta.16-Setup.exe --pattern SHA256SUMS.txt --dir $directory
+          if ($LASTEXITCODE -ne 0) { throw 'Fixed draft download failed.' }
+          $files = @(Get-ChildItem -LiteralPath $directory -Force)
+          if ($files.Count -ne 2) { throw 'Exact fixture count required.' }
+          foreach ($file in $expected) {
+            $path = Join-Path $directory $file.name
+            $item = Get-Item -LiteralPath $path -Force
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -ne $file.size -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $file.sha256) { throw 'Downloaded fixture differs from reviewed bytes.' }
+          }
+          Write-Output 'Verified two fixed baseline files. No application or installer was executed.'
+      - name: Store the verified fixture for read-only build jobs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: Taskbar-Select-beta16-upgrade-baseline
+          path: artifacts/beta16-baseline/
+          retention-days: 90
+          if-no-files-found: error
