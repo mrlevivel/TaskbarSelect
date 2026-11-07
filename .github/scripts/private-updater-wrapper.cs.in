@@ -1,0 +1,588 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.IO.Pipes;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Web.Script.Serialization;
+using System.Windows.Forms;
+
+// Private CI-only updater acceptance adapter. Never compiled into any package.
+internal static class PrivateUpdaterCiFixture
+{
+    [STAThread] static int Main(string[] args) { return AdministratorCiLaunchProbe.PrivateUpdaterMain(args); }
+}
+
+internal static partial class AdministratorCiLaunchProbe
+{
+    const string PrivateUpdaterBranch = "refs/heads/codex/beta18-private-updater";
+    const string PrivateUpdaterAppHash = "@TARGET_APP_SHA256@";
+    const string PrivateUpdaterSetupHash = "@TARGET_SETUP_SHA256@";
+    const string PrivateUpdaterConsentName = "private-unsigned-warning-consent.json";
+    const string PrivateAttachmentMetadataModeName = "private-attachment-metadata-mode.json";
+    const string PrivateSetupObservationModeName = "private-setup-observation-mode.json";
+    static readonly string[] PrivateUpdaterAssets = {
+        "TaskbarSelect-1.0.0-beta.17-Setup.exe", "TaskbarSelect-1.0.0-beta.18-Setup.exe",
+        "SHA256SUMS.txt", "TaskbarSelect.exe", "PrivateUpdateFixture.exe", "SetupWizardSupervisor.exe"
+    };
+    static readonly string[] PrivateUpdaterScripts = { "private-updater-child.ps1", "private-updater-run.ps1" };
+    static readonly List<string> privateUpdaterStaged = new List<string>();
+
+    internal static int PrivateUpdaterMain(string[] args)
+    {
+        try {
+            // HIGH is admitted by the unchanged authenticated parent-handle
+            // protocol, not spoofable inherited environment variables.
+            bool high = args.Length == 10 && args[0] == "--high-boundary";
+            if (!high) {
+                Hosted();
+                Require(Environment.GetEnvironmentVariable("GITHUB_REF") == PrivateUpdaterBranch &&
+                    Environment.GetEnvironmentVariable("GITHUB_EVENT_NAME") == "workflow_dispatch");
+                if (args.Length == 3 && args[0] == "--run-ci")
+                    Require(Environment.GetEnvironmentVariable("GITHUB_REPOSITORY") == "mrlevivel/TaskbarSelect");
+            }
+            boundaryStageExtension = StagePrivateUpdaterInputs;
+            boundaryRemoveExtension = RemovePrivateUpdaterInputs;
+            boundaryCopyExtension = CopyPrivateUpdaterEvidence;
+            boundaryReceiveTimeout = 170000;
+            int result;
+            if (TryBoundaryEntry(args, PrivateUpdaterHigh, out result)) return result;
+            selfPath = Assembly.GetExecutingAssembly().Location;
+            using (var own = new FileStream(selfPath, FileMode.Open, FileAccess.Read, FileShare.Read)) selfHash = Hash(own);
+            if (args.Length == 8 && args[0] == "--medium") return PrivateUpdaterMedium(args);
+            return 2;
+        } catch (Exception error) {
+            Console.Error.WriteLine("Private updater fixture refusal hr=0x" + error.HResult.ToString("X8", CultureInfo.InvariantCulture));
+            return 2;
+        }
+    }
+
+    static void PrivateUpdaterFile(string path)
+    {
+        Require(Path.IsPathRooted(path) && File.Exists(path));
+        long size = new FileInfo(path).Length; Require(size > 0 && size <= 64 * 1024 * 1024);
+        for (string current = path; current != null; current = Path.GetDirectoryName(current.TrimEnd('\\')))
+            Require((File.GetAttributes(current) & FileAttributes.ReparsePoint) == 0);
+    }
+    static void StagePrivateUpdaterFile(string input, string root, string name)
+    {
+        Require(name == Path.GetFileName(name) && (PrivateUpdaterAssets.Contains(name) || PrivateUpdaterScripts.Contains(name) || name == PrivateUpdaterConsentName || name == PrivateAttachmentMetadataModeName || name == PrivateSetupObservationModeName));
+        PrivateUpdaterFile(input); string target = Path.Combine(root, name);
+        File.Copy(input, target, false); Require(FileHashForBoundary(input) == FileHashForBoundary(target));
+        privateUpdaterStaged.Add(target);
+    }
+    static void ValidatePrivateUpdaterConsent(string path, string source)
+    {
+        Require(!File.Exists(Path.Combine(Path.GetDirectoryName(path), PrivateAttachmentMetadataModeName)) &&
+            !File.Exists(Path.Combine(Path.GetDirectoryName(path), PrivateSetupObservationModeName)));
+        // This optional input authorizes one specific normal unsigned-file
+        // warning only. It is absent by default and is never a token or a way
+        // to authorize UAC, SmartScreen, another binary or another CI run.
+        PrivateUpdaterFile(path); Require(new FileInfo(path).Length <= 4096 && SourceSha(source));
+        var value = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+        string[] keys = { "schema", "sourceSha", "setupSha256", "runId", "NormalOpenFileWarningOnly", "oneTime" };
+        Require(value != null && value.Count == keys.Length && keys.All(key => value.ContainsKey(key)));
+        string run = Environment.GetEnvironmentVariable("GITHUB_RUN_ID");
+        Require(run != null && run.Length >= 1 && run.Length <= 20 && run.All(c => c >= '0' && c <= '9') &&
+            value["schema"] as string == "taskbar-select-private-unsigned-warning-consent-v1" && value["sourceSha"] as string == source &&
+            value["setupSha256"] as string == PrivateUpdaterSetupHash && value["runId"] as string == run &&
+            value["NormalOpenFileWarningOnly"] is bool && (bool)value["NormalOpenFileWarningOnly"] &&
+            value["oneTime"] is bool && (bool)value["oneTime"]);
+    }
+    static bool PrivateAttachmentMetadataModeShape(Dictionary<string, object> value, string source)
+    {
+        string[] keys = { "schema", "sourceSha", "runId", "metadataOnly" };
+        if (!SourceSha(source) || value == null || value.Count != keys.Length || !keys.All(key => value.ContainsKey(key))) return false;
+        string run = value["runId"] as string;
+        return run != null && run.Length >= 1 && run.Length <= 20 && run.All(c => c >= '0' && c <= '9') &&
+            value["schema"] as string == "taskbar-select-private-attachment-metadata-mode-v1" && value["sourceSha"] as string == source &&
+            value["metadataOnly"] is bool && (bool)value["metadataOnly"];
+    }
+    static bool PrivateAttachmentMetadataModeRunMatches(Dictionary<string, object> value, string source, string run)
+    {
+        return PrivateAttachmentMetadataModeShape(value, source) && run != null && value["runId"] as string == run;
+    }
+    static Dictionary<string, object> ReadPrivateAttachmentMetadataMode(string path, string source)
+    {
+        PrivateUpdaterFile(path); Require(new FileInfo(path).Length <= 4096);
+        var value = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+        Require(PrivateAttachmentMetadataModeShape(value, source));
+        Require(!File.Exists(Path.Combine(Path.GetDirectoryName(path), PrivateUpdaterConsentName)));
+        Require(!File.Exists(Path.Combine(Path.GetDirectoryName(path), PrivateSetupObservationModeName)));
+        return value;
+    }
+    static void ValidatePrivateAttachmentMetadataMode(string path, string source)
+    {
+        Require(PrivateAttachmentMetadataModeRunMatches(ReadPrivateAttachmentMetadataMode(path, source), source,
+            Environment.GetEnvironmentVariable("GITHUB_RUN_ID")));
+    }
+    static bool PrivateSetupObservationModeShape(Dictionary<string, object> value, string source)
+    {
+        string[] keys = { "schema", "sourceSha", "runId", "observationOnly" };
+        if (!SourceSha(source) || value == null || value.Count != keys.Length || !keys.All(key => value.ContainsKey(key))) return false;
+        string run = value["runId"] as string;
+        return run != null && run.Length >= 1 && run.Length <= 20 && run.All(c => c >= '0' && c <= '9') &&
+            value["schema"] as string == "taskbar-select-private-setup-observation-mode-v1" && value["sourceSha"] as string == source &&
+            value["observationOnly"] is bool && (bool)value["observationOnly"];
+    }
+    static bool PrivateSetupObservationModeRunMatches(Dictionary<string, object> value, string source, string run)
+    {
+        return PrivateSetupObservationModeShape(value, source) && run != null && value["runId"] as string == run;
+    }
+    static Dictionary<string, object> ReadPrivateSetupObservationMode(string path, string source)
+    {
+        PrivateUpdaterFile(path); Require(new FileInfo(path).Length <= 4096);
+        var value = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+        Require(PrivateSetupObservationModeShape(value, source) &&
+            !File.Exists(Path.Combine(Path.GetDirectoryName(path), PrivateUpdaterConsentName)) &&
+            !File.Exists(Path.Combine(Path.GetDirectoryName(path), PrivateAttachmentMetadataModeName)));
+        return value;
+    }
+    static void ValidatePrivateSetupObservationMode(string path, string source)
+    {
+        Require(PrivateSetupObservationModeRunMatches(ReadPrivateSetupObservationMode(path, source), source,
+            Environment.GetEnvironmentVariable("GITHUB_RUN_ID")));
+    }
+    static void StagePrivateUpdaterInputs(string source)
+    {
+        Require(FileHashForBoundary(boundaryInputApp) == PrivateUpdaterAppHash &&
+            FileVersionInfo.GetVersionInfo(boundaryInputApp).ProductVersion == "1.0.0-beta.18");
+        string repo = Path.GetDirectoryName(Path.GetDirectoryName(boundaryInputApp));
+        string root = Path.Combine(source, "private-updater-input"); Require(!Directory.Exists(root)); Directory.CreateDirectory(root);
+        foreach (string name in PrivateUpdaterAssets)
+            StagePrivateUpdaterFile(Path.Combine(repo, "artifacts/private-updater-input", name), root, name);
+        foreach (string name in PrivateUpdaterScripts)
+            StagePrivateUpdaterFile(Path.Combine(repo, "artifacts/private-updater-input", name), root, name);
+        string consent = Path.Combine(repo, "artifacts/private-updater-input", PrivateUpdaterConsentName);
+        string metadataMode = Path.Combine(repo, "artifacts/private-updater-input", PrivateAttachmentMetadataModeName);
+        string observationMode = Path.Combine(repo, "artifacts/private-updater-input", PrivateSetupObservationModeName);
+        Require(!File.Exists(observationMode) && !File.Exists(metadataMode));
+        if (File.Exists(observationMode)) {
+            ValidatePrivateSetupObservationMode(observationMode, boundarySourceSha);
+            StagePrivateUpdaterFile(observationMode, root, PrivateSetupObservationModeName);
+            ValidatePrivateSetupObservationMode(Path.Combine(root, PrivateSetupObservationModeName), boundarySourceSha);
+        }
+        if (File.Exists(metadataMode)) {
+            ValidatePrivateAttachmentMetadataMode(metadataMode, boundarySourceSha);
+            StagePrivateUpdaterFile(metadataMode, root, PrivateAttachmentMetadataModeName);
+            ValidatePrivateAttachmentMetadataMode(Path.Combine(root, PrivateAttachmentMetadataModeName), boundarySourceSha);
+        }
+        if (File.Exists(consent)) {
+            Require(!File.Exists(metadataMode));
+            ValidatePrivateUpdaterConsent(consent, boundarySourceSha);
+            StagePrivateUpdaterFile(consent, root, PrivateUpdaterConsentName);
+            ValidatePrivateUpdaterConsent(Path.Combine(root, PrivateUpdaterConsentName), boundarySourceSha);
+        }
+        Require(FileHashForBoundary(Path.Combine(root, "TaskbarSelect-1.0.0-beta.18-Setup.exe")) == PrivateUpdaterSetupHash);
+    }
+    static void RemovePrivateUpdaterInputs(string source)
+    {
+        string root = Path.Combine(source, "private-updater-input");
+        foreach (string path in privateUpdaterStaged) {
+            Require(Path.GetDirectoryName(path) == root); PrivateUpdaterFile(path); File.Delete(path);
+        }
+        // Exact files, then an empty owned directory. Never recursive deletion.
+        Directory.Delete(root, false);
+    }
+    static Dictionary<string, object> ReadPrivateUpdaterReceipt(string path)
+    {
+        PrivateUpdaterFile(path); Require(new FileInfo(path).Length <= 65536);
+        return new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+    }
+    static void CopyPrivateUpdaterEvidence(string runtime)
+    {
+        string input = Path.Combine(runtime, "private-updater-result.json"); if (!File.Exists(input)) return;
+        var raw = ReadPrivateUpdaterReceipt(input);
+        var safe = new Dictionary<string, object>();
+        foreach (string name in new[] { "schema", "status", "sourceSha", "appSha256", "setupSha256", "phase", "errorType" }) {
+            object value;
+            if (!raw.TryGetValue(name, out value)) continue;
+            if (name == "errorType" && value == null) continue;
+            string text = value as string;
+            Require(text != null && text.Length <= 160 && text.All(c => Char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.'));
+            safe.Add(name, text);
+        }
+        foreach (string name in new[] { "hostStatus", "hostPhase", "hostErrorType", "baseErrorType", "hostStage5UiState", "hostLaunchExceptionType", "watchStatus", "watchLaunchExceptionType", "normalUnsignedWarningEligibility", "warningNameCarrierClass", "warningNameCarrierShape", "warningNameCarrierParse", "warningPathBinding", "warningFileIdentityStatus", "wizardStatus", "wizardPhase", "wizardErrorType", "helperStatus", "helperPhase", "helperErrorType" }) {
+            object value;
+            if (!raw.TryGetValue(name, out value) || value == null) continue;
+            string text = value as string;
+            Require(text != null && text.Length >= 1 && text.Length <= 80 &&
+                text.All(c => c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '.' || c == '-'));
+            if (name == "hostStatus") Require(new[] { "Missing", "running", "launched", "failed", "Invalid" }.Contains(text, StringComparer.Ordinal));
+            if (name == "hostStage5UiState") Require(new[] { "None", "VerificationOrShellWait", "SetupOpening", "GenericLaunchFailure", "ApprovalRejected", "Other" }.Contains(text, StringComparer.Ordinal));
+            if (name == "watchStatus") Require(new[] { "Missing", "Observed", "Invalid", "TransientUnavailable" }.Contains(text, StringComparer.Ordinal));
+            if (name == "normalUnsignedWarningEligibility") Require(new[] { "NotObserved", "StateNotEligible", "OwnerMismatch", "PathUnproved", "ControlsUnproved", "CheckboxUnproved", "FileMismatch", "EnumerationBound", "ReadFailed", "Eligible" }.Contains(text, StringComparer.Ordinal));
+            if (name == "warningNameCarrierClass") Require(new[] { "None", "SysLink", "Static", "Edit", "Button", "Other", "Mixed" }.Contains(text, StringComparer.Ordinal));
+            if (name == "warningNameCarrierShape") Require(new[] { "None", "Plain", "Anchored", "OpenOnly", "CloseOnly", "EmbeddedAnchor", "Other", "Mixed" }.Contains(text, StringComparer.Ordinal));
+            if (name == "warningNameCarrierParse") Require(new[] { "None", "NotSysLink", "NotAnchored", "LengthBound", "XmlMalformed", "DocumentShape", "RootName", "RootNamespace", "ChildShape", "AttributeCount", "AttributeNamespace", "AttributeName", "Parsed", "Mixed" }.Contains(text, StringComparer.Ordinal));
+            if (name == "warningPathBinding") Require(new[] { "None", "ExactPath", "ExactNameAndDirectory", "ExactNameVerifiedLaunchContext", "ExactFileIdentity", "ExactCompactedVerifiedSuffix" }.Contains(text, StringComparer.Ordinal));
+            if (name == "warningFileIdentityStatus") Require(new[] { "NotObserved", "NotDosPath", "WrongLeaf", "WrongVolume", "AncestorBound", "UnsafeAncestor", "OpenFailed", "MetadataFailed", "UnsafeFile", "DifferentFile", "Match", "ReadFailed" }.Contains(text, StringComparer.Ordinal));
+            if (name == "wizardStatus") Require(new[] { "Missing", "passed", "failed", "Invalid", "TransientUnavailable" }.Contains(text, StringComparer.Ordinal));
+            if (name == "wizardPhase") Require(new[] { "None", "admission", "pin-setup", "wizard", "passed" }.Contains(text, StringComparer.Ordinal));
+            if (name == "helperStatus") Require(new[] { "Missing", "observed", "failed" }.Contains(text, StringComparer.Ordinal));
+            if (name == "helperPhase") Require(new[] { "None", "admission", "launch", "observe", "complete" }.Contains(text, StringComparer.Ordinal));
+            safe.Add(name, text);
+        }
+        object rawPages;
+        object rawWarningActionMethod;
+        if (raw.TryGetValue("normalUnsignedWarningActionMethod", out rawWarningActionMethod)) {
+            string method = rawWarningActionMethod as string;
+            Require(method != null && new[] { "None", "UIAInvoke" }.Contains(method, StringComparer.Ordinal));
+            safe.Add("normalUnsignedWarningActionMethod", method);
+        }
+        object rawCompactedSuffix;
+        if (raw.TryGetValue("warningCompactedSuffixMatch", out rawCompactedSuffix)) {
+            Require(rawCompactedSuffix is bool); safe.Add("warningCompactedSuffixMatch", rawCompactedSuffix);
+        }
+        foreach (string name in new[] { "warningActivationObserved", "warningDialogActive", "warningDialogForeground", "warningForegroundOwnedByFixture", "normalUnsignedWarningSendAttempted", "normalUnsignedWarningSendReturned", "warningSendActiveVerified", "warningSendForegroundVerified" }) {
+            object value; if (raw.TryGetValue(name, out value)) { Require(value is bool); safe.Add(name, value); }
+        }
+        foreach (string name in new[] { "warningRootEnabled", "warningRunParentIsWarning", "warningRunAncestorChainKnown", "warningRunAncestorChainEnabled" }) {
+            object value; if (raw.TryGetValue(name, out value)) { Require(value is bool); safe.Add(name, value); }
+        }
+        // SendInput is synthetic input on the disposable CI desktop. These
+        // facts do not label it a physical human click or Setup acceptance.
+        foreach (string name in new[] { "warningUiaPatternAvailable", "warningUiaInvokeAttempted", "warningUiaInvokeReturned", "warningUiaSessionVerified", "warningUiaDesktopVerified", "warningUiaOwnerVerified", "warningUiaMarkerWritten", "warningUiaFinalFencePassed", "normalUnsignedWarningInputAttempted", "warningInputDesktopVerified", "warningInputTargetVerified", "warningInputSessionVerified", "warningInputKeysReleased", "warningInputActiveVerified", "warningInputForegroundVerified", "globalInput" }) {
+            object value; if (raw.TryGetValue(name, out value)) { Require(value is bool); safe.Add(name, value); }
+        }
+        object rawWarningInputEvents;
+        if (raw.TryGetValue("warningInputEventsInserted", out rawWarningInputEvents)) {
+            Require(rawWarningInputEvents is int || rawWarningInputEvents is long);
+            long count = Convert.ToInt64(rawWarningInputEvents, CultureInfo.InvariantCulture);
+            Require(count >= 0 && count <= 3); safe.Add("warningInputEventsInserted", (int)count);
+        }
+        object rawWarningInputGate;
+        if (raw.TryGetValue("warningInputGateStatus", out rawWarningInputGate)) {
+            string inputGate = rawWarningInputGate as string;
+            Require(inputGate != null && new[] { "NotObserved", "SessionUnavailable", "DesktopUnavailable", "KeysHeld", "GuiUnavailable", "TargetUnavailable", "Eligible", "Attempted" }.Contains(inputGate, StringComparer.Ordinal));
+            safe.Add("warningInputGateStatus", inputGate);
+        }
+        object rawWarningParentDepth;
+        if (raw.TryGetValue("warningRunParentDepth", out rawWarningParentDepth)) {
+            Require(rawWarningParentDepth is int || rawWarningParentDepth is long);
+            long depth = Convert.ToInt64(rawWarningParentDepth, CultureInfo.InvariantCulture);
+            Require(depth >= 0 && depth <= 32); safe.Add("warningRunParentDepth", (int)depth);
+        }
+        object rawWarningParentClass;
+        if (raw.TryGetValue("warningRunParentClass", out rawWarningParentClass)) {
+            string parentClass = rawWarningParentClass as string;
+            Require(parentClass != null && new[] { "None", "Dialog", "DirectUI", "Button", "Static", "Other" }.Contains(parentClass, StringComparer.Ordinal));
+            safe.Add("warningRunParentClass", parentClass);
+        }
+        foreach (string name in new[] { "metadataOnly", "fullUpdateTested", "nonExecuting", "executeApiCalled", "promptApiCalled", "saveWithUiApiCalled", "metadataHelperExited", "metadataHelperReceiptOwnerVerified", "metadataHelperHashVerified" }) {
+            object value; if (raw.TryGetValue(name, out value)) { Require(value is bool); safe.Add(name, value); }
+        }
+        foreach (string name in new[] { "setupObservationOnly", "observationCompleted", "noInput", "noInstallActions", "updaterPassed", "observationHelperExited", "observationHelperReceiptOwnerVerified", "observationHelperHashVerified", "launchAttempted", "shellReturned", "returnedProcessPresent", "setupAuthenticated", "setupExited", "setupExitAvailable", "shellCallPending", "anyWindowEnabled", "anyWindowDisabled", "anyOwnedModal", "anyPositiveSize", "anyNonpositiveSize", "wizardClassWrongTitle", "otherClassExpectedTitle", "controlReadFailed", "boundsReached", "zonePresentBefore", "zonePresentAfter", "zoneUnchanged", "nextOnAnyControl", "nextOnButton", "nextCachedOnButton", "noArrowNextOnAnyControl" }) {
+            object value; if (raw.TryGetValue(name, out value)) { Require(value is bool); safe.Add(name, value); }
+        }
+        var observationBounds = new Dictionary<string, int> { { "ownedDescendants", 4 }, { "visibleWindows", 8 }, { "visibleControls", 128 }, { "classBits", 255 }, { "titleBits", 63 }, { "pageBits", 255 }, { "buttonBits", 255 }, { "enabledButtonBits", 255 }, { "recognizedWizardWindows", 8 }, { "elapsedMilliseconds", 30000 }, { "frameworkFactsBits", 32767 }, { "frameworkStableSamples", 128 }, { "frameworkCandidateCount", 8 }, { "buttonClassCount", 128 }, { "buttonReadSuccessCount", 128 }, { "buttonReadFailedCount", 128 } };
+        foreach (var field in observationBounds) {
+            object value; if (!raw.TryGetValue(field.Key, out value)) continue;
+            Require(value is int || value is long); long number = Convert.ToInt64(value, CultureInfo.InvariantCulture);
+            Require(number >= 0 && number <= field.Value); safe.Add(field.Key, (int)number);
+        }
+        object rawSetupExit;
+        if (raw.TryGetValue("setupExit", out rawSetupExit)) {
+            Require(rawSetupExit is int || rawSetupExit is long); long value = Convert.ToInt64(rawSetupExit, CultureInfo.InvariantCulture);
+            Require(value >= Int32.MinValue && value <= Int32.MaxValue); safe.Add("setupExit", (int)value);
+        }
+        foreach (string prefix in new[] { "baseline", "contentPin", "contentAndZonePin", "afterZoneRelease" }) {
+            object rawHresult;
+            string hresultName = prefix + "Hresult";
+            if (raw.TryGetValue(hresultName, out rawHresult)) {
+                Require(rawHresult is int || rawHresult is long);
+                long value = Convert.ToInt64(rawHresult, CultureInfo.InvariantCulture);
+                Require(value >= Int32.MinValue && value <= Int32.MaxValue); safe.Add(hresultName, (int)value);
+            }
+            foreach (string suffix in new[] { "SaveCalled", "FilePresent", "ContentsUnchanged", "Zone3Retained", "ZoneChanged" }) {
+                string name = prefix + suffix; object value;
+                if (raw.TryGetValue(name, out value)) { Require(value is bool); safe.Add(name, value); }
+            }
+        }
+        foreach(var bound in new Dictionary<string,int> {{"wizardCheckpoint",64},{"wizardReadyPathControlCount",8}}) {
+            object value;if(!raw.TryGetValue(bound.Key,out value))continue;
+            Require(value is int || value is long);long number=Convert.ToInt64(value,CultureInfo.InvariantCulture);
+            Require(number>=0 && number<=bound.Value);safe.Add(bound.Key,(int)number);
+        }
+        object rawObservedPage;
+        if(raw.TryGetValue("wizardObservedPage",out rawObservedPage)) {
+            string observed=rawObservedPage as string;
+            Require(new[]{"None","welcome","destination","tasks","ready","installing","complete","unknown"}.Contains(observed,StringComparer.Ordinal));
+            safe.Add("wizardObservedPage",observed);
+        }
+        foreach(string name in new[]{"wizardReadyDestinationVerified","wizardReadyDestinationFromControl","wizardReadyDestinationFromRegistration"}) {
+            object value;if(raw.TryGetValue(name,out value)){Require(value is bool);safe.Add(name,value);}
+        }
+        if (raw.TryGetValue("wizardPageIds", out rawPages) && rawPages != null) {
+            string text = rawPages as string;
+            Require(text != null && text.Length >= 1 && text.Length <= 128);
+            if (text != "None") {
+                string[] pages = text.Split('|');
+                Require(pages.Length >= 1 && pages.Length <= 8 && pages.Distinct(StringComparer.Ordinal).Count() == pages.Length &&
+                    pages.All(page => new[] { "welcome", "destination", "tasks", "ready", "complete" }.Contains(page, StringComparer.Ordinal)));
+            }
+            safe.Add("wizardPageIds", text);
+        }
+        object rawMaskedShape;
+        if (raw.TryGetValue("warningNameCarrierMaskedShape", out rawMaskedShape) && rawMaskedShape != null) {
+            string text = rawMaskedShape as string;
+            Require(text != null && text.Length <= 272);
+            const string characters = "x0:/\\.~_-'\"<>=?&;()[] ";
+            string[] tokens = { "{SETUP}", "{LRM}", "{RLM}", "{LRE}", "{PDF}", "{TAB}", "{CR}", "{LF}", "{BOM}", "{BOUND}", "{MULTIPLE}" };
+            for (int index = 0; index < text.Length; index++) {
+                if (text[index] != '{') { Require(characters.IndexOf(text[index]) >= 0); continue; }
+                int end = text.IndexOf('}', index);
+                Require(end > index && tokens.Contains(text.Substring(index, end - index + 1), StringComparer.Ordinal));
+                index = end;
+            }
+            safe.Add("warningNameCarrierMaskedShape", text);
+        }
+        foreach (string name in new[] { "settingsPreserved", "reopenedExactTarget", "cleanupConfirmed", "installedRegistrationVerified", "startupPreserved", "realInstallerLaunched", "publicGitHubTested", "interactiveUacTested", "rememberedApprovalTested", "sourceBuiltPredecessor", "exactReleasedBeta17", "intermediateProgressObserved", "checkedFeed", "downloaded", "realStaging", "declinedInstallConfirmed", "confirmedInstall", "actualSetupExitConfirmed", "predecessorExitConfirmed", "hostReceiptAvailable", "hostReceiptOwnerVerified", "hostStage5Busy", "hostStage5Closing", "hostStage5ActiveLaunch", "hostStage5Launching", "hostAfterYesClickReturned", "watchReceiptAvailable", "watchReceiptOwnerVerified", "watchAfterYesClickReturned", "watchStage5Launching", "watchStage5ActiveLaunch", "watchDialogEnumerationTruncated", "normalUnsignedWarningConsentPresent", "normalUnsignedWarningConsentValidated", "normalUnsignedWarningEligible", "normalUnsignedWarningRunPosted", "normalUnsignedWarningAccepted", "normalUnsignedWarningProofInvalid", "warningExactPathText", "warningExactNameText", "warningExactDirectoryText", "warningRunButtonUnique", "warningCancelButtonUnique", "warningCheckboxUnique", "warningCheckboxStateKnown", "warningCheckboxChecked", "warningVerifiedInstaller", "securityDialogsAutomated", "warningTextContainsFullPath", "warningTextContainsName", "warningTextContainsDirectory", "warningTextSysLink", "warningTextAnchorParsed", "warningTextBidiWrapped", "warningNameCarrierAttributeId", "warningNameCarrierAttributeHref", "warningNameCarrierAttributeCaseVariant", "warningNameCarrierAttributeOther", "warningNameCarrierLiteralName", "warningNameCarrierLiteralPath", "warningNameCarrierLiteralDirectory", "warningNameCarrierLiteralBidi", "warningTextOfficialUrl", "warningTextOfficialOrigin", "warningVerifiedDescriptor", "warningLaunchContextVerified", "warningFileIdentityMatch" }) {
+            object value; if (raw.TryGetValue(name, out value)) { Require(value is bool); safe.Add(name, value); }
+        }
+        foreach (string name in new[] { "checks", "elapsedMs", "hresult" }) {
+            object value; if (raw.TryGetValue(name, out value)) { if (name == "hresult" && value == null) continue; Require(value is int || value is long); safe.Add(name, value); }
+        }
+        foreach (string name in new[] { "hostHresult", "baseHresult", "hostReadLastHresult", "failureLine", "hostReadRetries", "hostLaunchExceptionHresult", "hostLaunchNativeError", "hostTimerTicks", "hostLaunchExceptionCount", "watchLaunchExceptionHresult", "watchLaunchNativeError", "watchSample", "watchStage", "watchTimerTicks", "watchInstallDialogCount", "watchSecurityDialogCount", "watchUnknownDialogCount", "watchUnresponsiveDialogCount", "watchLaunchExceptionCount", "normalUnsignedWarningRunCount", "wizardHresult", "wizardButtons", "wizardUnknownWindowObservations", "helperHresult" }) {
+            object rawNumber;
+            if (!raw.TryGetValue(name, out rawNumber) || rawNumber == null) continue;
+            Require(rawNumber is int || rawNumber is long);
+            long value = Convert.ToInt64(rawNumber, CultureInfo.InvariantCulture);
+            Require(value >= Int32.MinValue && value <= Int32.MaxValue);
+            if (name == "failureLine" || name == "hostReadRetries" || name == "hostTimerTicks" || name == "hostLaunchExceptionCount" ||
+                name == "watchSample" || name == "watchStage" || name == "watchTimerTicks" || name == "watchInstallDialogCount" ||
+                name == "watchSecurityDialogCount" || name == "watchUnknownDialogCount" || name == "watchUnresponsiveDialogCount" || name == "watchLaunchExceptionCount" || name == "normalUnsignedWarningRunCount" || name == "wizardButtons" || name == "wizardUnknownWindowObservations") Require(value >= 0);
+            safe.Add(name, (int)value);
+        }
+        CopyPrivateWarningInputTelemetry(raw, safe);
+        File.WriteAllText(Path.Combine(boundaryEvidence, "private-updater-result.json"), new JavaScriptSerializer().Serialize(safe), new UTF8Encoding(false));
+    }
+
+    // Diagnostic export only. Input admission, sequencing, consent and launch
+    // acceptance are unchanged. Never retain paths, handles or arbitrary text.
+    internal static void CopyPrivateWarningInputTelemetry(Dictionary<string, object> raw, Dictionary<string, object> safe)
+    {
+        object value;
+        safe["warningInputTelemetryExportMissing"] = !raw.TryGetValue("warningInputTelemetry", out value);
+        safe["warningInputTelemetryExportInvalid"] = false;
+        object invalid;
+        if (raw.TryGetValue("warningInputTelemetryInvalid", out invalid)) {
+            if (invalid is bool) safe["warningInputTelemetryInvalid"] = invalid;
+            else { safe["warningInputTelemetryInvalid"] = true; safe["warningInputTelemetryExportInvalid"] = true; }
+        }
+        if ((bool)safe["warningInputTelemetryExportMissing"]) return;
+        try {
+            var telemetry = value as Dictionary<string, object>;
+            string[] numbers = { "version", "phase", "revision", "sequenceOutcome", "moveEvents", "buttonEvents", "pointerSamples",
+                "virtualX", "virtualY", "virtualWidth", "virtualHeight", "runLeft", "runTop", "runRight", "runBottom", "intendedX", "intendedY", "normalizedX", "normalizedY",
+                "clipLeft", "clipTop", "clipRight", "clipBottom", "moveX", "moveY", "postX", "postY", "preflightMs", "consumedMs", "moveStartedMs", "moveReturnedMs", "pointerMs", "proofMs", "buttonsStartedMs", "buttonsReturnedMs", "postMs" };
+            string[] booleans = { "clipQuerySucceeded", "intendedInsideClip", "moveCallStarted", "moveReturned", "moveCursorQuerySucceeded", "moveInsideRun", "moveHitOwnedRun", "moveHitOwnedWarning", "pointerVerified", "finalProofObserved", "finalProofVerified", "proofClipQuerySucceeded", "proofClipAllowsPoint", "buttonsCallStarted", "buttonsReturned", "postCursorQuerySucceeded", "postEqualsIntended", "postInsideRun", "postHitOwnedRun", "postHitOwnedWarning", "warningStillPresent" };
+            if (telemetry == null || telemetry.Count != numbers.Length + booleans.Length ||
+                telemetry.Keys.Any(k => !numbers.Contains(k, StringComparer.Ordinal) && !booleans.Contains(k, StringComparer.Ordinal))) throw new InvalidOperationException();
+            var copy = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (string name in numbers) {
+                object number; if (!telemetry.TryGetValue(name, out number) || !(number is int || number is long)) throw new InvalidOperationException();
+                long n = Convert.ToInt64(number, CultureInfo.InvariantCulture);
+                if (n < Int32.MinValue || n > Int32.MaxValue ||
+                    (name.EndsWith("Ms", StringComparison.Ordinal) && (n < 0 || n > 300000)) ||
+                    ((name == "normalizedX" || name == "normalizedY") && (n < 0 || n > 65535)) ||
+                    ((name == "virtualWidth" || name == "virtualHeight") && (n < 0 || n > 32768)) ||
+                    (name == "version" && n != 1) || ((name == "phase" || name == "sequenceOutcome") && (n < 0 || n > 7)) ||
+                    (name == "revision" && (n < 0 || n > 4096)) || (name == "moveEvents" && (n < 0 || n > 1)) ||
+                    (name == "buttonEvents" && (n < 0 || n > 2)) || (name == "pointerSamples" && (n < 0 || n > 32))) throw new InvalidOperationException();
+                copy.Add(name, (int)n);
+            }
+            foreach (string name in booleans) { object flag; if (!telemetry.TryGetValue(name, out flag) || !(flag is bool)) throw new InvalidOperationException(); copy.Add(name, flag); }
+            // The child already validates all temporal/geometric relationships.
+            // Preserve its exact bounded values; do not infer acceptance here.
+            safe.Add("warningInputTelemetry", copy);
+        } catch (Exception) {
+            safe["warningInputTelemetryExportInvalid"] = true;
+            safe["normalUnsignedWarningProofInvalid"] = true;
+            // Existing attempted/count/consent evidence stays present unchanged.
+        }
+    }
+    sealed class PrivateUpdaterTarget : NativeWindow, IDisposable
+    {
+        internal PrivateUpdaterTarget() { CreateHandle(new CreateParams { Caption = "Owned private updater CI identity target", Width = 1, Height = 1, X = -30000, Y = -30000 }); }
+        public void Dispose() { DestroyHandle(); }
+    }
+    [StructLayout(LayoutKind.Sequential)] struct PrivateUpdaterMessage
+    { internal IntPtr Window; internal uint Id; internal UIntPtr WParam; internal IntPtr LParam; internal uint Time; internal int X, Y; internal uint Private; }
+    [DllImport("user32.dll", SetLastError = true)] static extern uint MsgWaitForMultipleObjectsEx(uint count, IntPtr[] handles, uint milliseconds, uint wakeMask, uint flags);
+    [DllImport("user32.dll", EntryPoint = "PeekMessageW", CharSet = CharSet.Unicode, ExactSpelling = true)] static extern bool PeekMessage(out PrivateUpdaterMessage message, IntPtr window, uint minimum, uint maximum, uint remove);
+    [DllImport("user32.dll")] static extern bool TranslateMessage(ref PrivateUpdaterMessage message);
+    [DllImport("user32.dll", EntryPoint = "DispatchMessageW", CharSet = CharSet.Unicode, ExactSpelling = true)] static extern IntPtr DispatchMessage(ref PrivateUpdaterMessage message);
+    static bool WaitPrivateUpdaterMedium(Life child)
+    {
+        var clock = Stopwatch.StartNew(); IntPtr[] handles = { child.Handle };
+        for (;;) {
+            if (child.Exited(0)) return true;
+            long remaining = 160000 - clock.ElapsedMilliseconds; if (remaining <= 0) return false;
+            uint state = MsgWaitForMultipleObjectsEx(1, handles, (uint)Math.Min(1000, remaining), 0x04ff, 4);
+            if (state == 0) return true;
+            if (state == 258) continue;
+            if (state == UInt32.MaxValue) throw new NativeFailure(Last());
+            Require(state == 1);
+            for (int count = 0; count < 64; count++) {
+                PrivateUpdaterMessage message; if (!PeekMessage(out message, IntPtr.Zero, 0, 0, 1)) break;
+                if (message.Id == 0x12) throw new NativeFailure(1223);
+                TranslateMessage(ref message); DispatchMessage(ref message);
+            }
+        }
+    }
+    static int PrivateUpdaterHigh(PipeStream sponsor, string app, string runtime, uint sponsorPid, long sponsorStarted, string source)
+    {
+        string phase = "validate-target"; int checks = 0; bool metadataOnly = false, setupObservationOnly = false;
+        try {
+            Require(FileHashForBoundary(app) == PrivateUpdaterAppHash); checks++;
+            string metadataMode = Path.Combine(Path.GetDirectoryName(app), "private-updater-input", PrivateAttachmentMetadataModeName);
+            string observationMode = Path.Combine(Path.GetDirectoryName(app), "private-updater-input", PrivateSetupObservationModeName);
+            metadataOnly = File.Exists(metadataMode);
+            setupObservationOnly = File.Exists(observationMode);
+            Require(!(metadataOnly && setupObservationOnly));
+            // HIGH is authenticated by the unchanged transferred parent/image
+            // grant, not by inherited hosted environment fields: Shell runas
+            // may rebuild its environment. ROOT already validated the actual
+            // event/run and copied this protected marker hash-for-hash; HIGH
+            // checks its exact source-bound shape. MED independently requires
+            // its unchanged sponsor-inherited actual run before any probe.
+            if (metadataOnly) ReadPrivateAttachmentMetadataMode(metadataMode, source);
+            if (setupObservationOnly) ReadPrivateSetupObservationMode(observationMode, source);
+            using (var target = new PrivateUpdaterTarget()) {
+                phase = "request-medium";
+                CaseIdentity child = RequestBoundaryCase(sponsor, 0, Guid.NewGuid().ToString("N"), target.Handle);
+                Require(VerifyBoundaryCase(child)); checks++;
+                using (var owned = Life.Open(child.Id, child.Started)) {
+                    owned.Pin(selfPath); phase = "wait-medium";
+                    Require(WaitPrivateUpdaterMedium(owned) && owned.Exit() == 0); checks++;
+                }
+            }
+            phase = "validate-receipt";
+            var receipt = ReadPrivateUpdaterReceipt(Path.Combine(runtime, "private-updater-result.json"));
+            if (setupObservationOnly) {
+                Require((string)receipt["schema"] == "taskbar-select-private-setup-observation-result-v1" && (string)receipt["status"] == "observed" &&
+                    (string)receipt["sourceSha"] == source && (string)receipt["setupSha256"] == PrivateUpdaterSetupHash &&
+                    (bool)receipt["setupObservationOnly"] && !(bool)receipt["fullUpdateTested"] && !(bool)receipt["updaterPassed"] &&
+                    (bool)receipt["observationCompleted"] && (bool)receipt["noInput"] && (bool)receipt["noInstallActions"] &&
+                    !(bool)receipt["globalInput"] && !(bool)receipt["securityDialogsAutomated"] &&
+                    (bool)receipt["observationHelperExited"] && (bool)receipt["observationHelperReceiptOwnerVerified"] && (bool)receipt["observationHelperHashVerified"]);
+                checks++;
+                File.WriteAllText(Path.Combine(runtime, "result.json"), new JavaScriptSerializer().Serialize(new {
+                    schema = "taskbar-select-private-updater-ci-v1", status = "passed", sourceSha = source,
+                    appSha256 = PrivateUpdaterAppHash, setupSha256 = PrivateUpdaterSetupHash, checks = checks,
+                    metadataOnly = false, setupObservationOnly = true, fullUpdateTested = false,
+                    genuineMediumSetupObservationPassed = true, genuineMediumMetadataProbePassed = false, genuineMediumUpdaterPassed = false,
+                    publicGitHubTested = false, interactiveUacTested = false, rememberedApprovalLifecycleExecuted = false, rebootTested = false
+                }), new UTF8Encoding(false)); return 0;
+            }
+            if (metadataOnly) {
+                Require((string)receipt["schema"] == "taskbar-select-private-attachment-metadata-result-v1" && (string)receipt["status"] == "passed" &&
+                    (string)receipt["sourceSha"] == source && (bool)receipt["metadataOnly"] && !(bool)receipt["fullUpdateTested"] &&
+                    (bool)receipt["nonExecuting"] && !(bool)receipt["executeApiCalled"] && !(bool)receipt["promptApiCalled"] &&
+                    !(bool)receipt["saveWithUiApiCalled"] && (bool)receipt["cleanupConfirmed"] && (bool)receipt["metadataHelperExited"] &&
+                    (bool)receipt["metadataHelperReceiptOwnerVerified"] && (bool)receipt["metadataHelperHashVerified"]);
+                foreach (string prefix in new[] { "baseline", "contentPin", "contentAndZonePin", "afterZoneRelease" }) Require((bool)receipt[prefix + "SaveCalled"]);
+                checks++;
+                File.WriteAllText(Path.Combine(runtime, "result.json"), new JavaScriptSerializer().Serialize(new {
+                    schema = "taskbar-select-private-updater-ci-v1", status = "passed", sourceSha = source,
+                    appSha256 = PrivateUpdaterAppHash, setupSha256 = PrivateUpdaterSetupHash, checks = checks,
+                    metadataOnly = true, setupObservationOnly = false, fullUpdateTested = false, nonExecuting = true,
+                    genuineMediumMetadataProbePassed = true, genuineMediumUpdaterPassed = false, genuineMediumSetupObservationPassed = false,
+                    publicGitHubTested = false, interactiveUacTested = false, rememberedApprovalLifecycleExecuted = false, rebootTested = false
+                }), new UTF8Encoding(false)); return 0;
+            }
+            Require((string)receipt["schema"] == "taskbar-select-private-update-e2e-v1" && (string)receipt["status"] == "passed" &&
+                (string)receipt["sourceSha"] == source && (string)receipt["appSha256"] == PrivateUpdaterAppHash &&
+                (string)receipt["setupSha256"] == PrivateUpdaterSetupHash && (bool)receipt["settingsPreserved"] &&
+                (bool)receipt["reopenedExactTarget"] && (bool)receipt["cleanupConfirmed"] && (bool)receipt["sourceBuiltPredecessor"] &&
+                !(bool)receipt["exactReleasedBeta17"] && !(bool)receipt["publicGitHubTested"]); checks++;
+            File.WriteAllText(Path.Combine(runtime, "result.json"), new JavaScriptSerializer().Serialize(new {
+                schema = "taskbar-select-private-updater-ci-v1", status = "passed", sourceSha = source,
+                appSha256 = PrivateUpdaterAppHash, setupSha256 = PrivateUpdaterSetupHash, checks = checks,
+                metadataOnly = false, setupObservationOnly = false, fullUpdateTested = true, genuineMediumMetadataProbePassed = false, genuineMediumSetupObservationPassed = false,
+                genuineMediumUpdaterPassed = true, publicGitHubTested = false, interactiveUacTested = false,
+                rememberedApprovalLifecycleExecuted = false, rebootTested = false
+            }), new UTF8Encoding(false)); return 0;
+        } catch (Exception error) {
+            File.WriteAllText(Path.Combine(runtime, "result.json"), new JavaScriptSerializer().Serialize(new {
+                schema = "taskbar-select-private-updater-ci-v1", status = "failed", sourceSha = source,
+                appSha256 = PrivateUpdaterAppHash, checks = checks, phase = phase, errorType = error.GetType().Name,
+                hresult = error.HResult, metadataOnly = metadataOnly, setupObservationOnly = setupObservationOnly, fullUpdateTested = false,
+                genuineMediumMetadataProbePassed = false, genuineMediumUpdaterPassed = false, genuineMediumSetupObservationPassed = false,
+                publicGitHubTested = false, interactiveUacTested = false
+            }), new UTF8Encoding(false)); return 2;
+        }
+    }
+    static int PrivateUpdaterMedium(string[] args)
+    {
+        Require(args[4] == BoundaryScenarios[0] && FreshNonce(args[3]));
+        string app = Path.GetFullPath(args[1]), runtime = Path.GetFullPath(args[2]), source = Path.GetDirectoryName(selfPath);
+        Require(String.Equals(app, Path.Combine(source, "TaskbarSelect.exe"), StringComparison.OrdinalIgnoreCase) &&
+            String.Equals(runtime, Path.Combine(Path.GetDirectoryName(source), Path.GetFileName(source).Replace("TaskbarSelectCiSource.", "TaskbarSelectCiRuntime.")), StringComparison.OrdinalIgnoreCase));
+        IntPtr current = IntPtr.Zero, elevated = IntPtr.Zero;
+        try {
+            if (!OpenProcessToken(GetCurrentProcess(), 8, out current)) throw new NativeFailure(Last()); Token own = Read(current);
+            Require(own.Type == 1 && Medium(own));
+            using (var high = Life.Open(UInt32.Parse(args[5], CultureInfo.InvariantCulture), Int64.Parse(args[6], CultureInfo.InvariantCulture))) {
+                high.Pin(selfPath); Require(ActualPair(ProcessToken(high, 8, out elevated), own));
+                uint owner; Require(GetWindowThreadProcessId(new IntPtr(Int64.Parse(args[7], CultureInfo.InvariantCulture)), out owner) != 0 && owner == high.Pid);
+            }
+        } finally { if (elevated != IntPtr.Zero) CloseHandle(elevated); if (current != IntPtr.Zero) CloseHandle(current); }
+        string input = Path.Combine(source, "private-updater-input"), clone = Path.Combine(runtime, "private-updater-input");
+        Require(!Directory.Exists(clone)); Directory.CreateDirectory(clone);
+        foreach (string name in PrivateUpdaterAssets.Concat(PrivateUpdaterScripts)) {
+            string from = Path.Combine(input, name), to = Path.Combine(clone, name);
+            PrivateUpdaterFile(from); File.Copy(from, to, false); Require(FileHashForBoundary(from) == FileHashForBoundary(to));
+        }
+        string consent = Path.Combine(input, PrivateUpdaterConsentName);
+        string metadataMode = Path.Combine(input, PrivateAttachmentMetadataModeName);
+        string observationMode = Path.Combine(input, PrivateSetupObservationModeName);
+        if (File.Exists(observationMode)) {
+            string sourceSha = Environment.GetEnvironmentVariable("GITHUB_SHA");
+            ValidatePrivateSetupObservationMode(observationMode, sourceSha);
+            string target = Path.Combine(clone, PrivateSetupObservationModeName);
+            File.Copy(observationMode, target, false); Require(FileHashForBoundary(observationMode) == FileHashForBoundary(target));
+            ValidatePrivateSetupObservationMode(target, sourceSha);
+        }
+        if (File.Exists(metadataMode)) {
+            string sourceSha = Environment.GetEnvironmentVariable("GITHUB_SHA");
+            ValidatePrivateAttachmentMetadataMode(metadataMode, sourceSha);
+            string target = Path.Combine(clone, PrivateAttachmentMetadataModeName);
+            File.Copy(metadataMode, target, false); Require(FileHashForBoundary(metadataMode) == FileHashForBoundary(target));
+            ValidatePrivateAttachmentMetadataMode(target, sourceSha);
+        }
+        if (File.Exists(consent)) {
+            Require(!File.Exists(metadataMode));
+            string sourceSha = Environment.GetEnvironmentVariable("GITHUB_SHA");
+            ValidatePrivateUpdaterConsent(consent, sourceSha);
+            string target = Path.Combine(clone, PrivateUpdaterConsentName);
+            File.Copy(consent, target, false); Require(FileHashForBoundary(consent) == FileHashForBoundary(target));
+            ValidatePrivateUpdaterConsent(target, sourceSha);
+        }
+        var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32/WindowsPowerShell/v1.0/powershell.exe"),
+            "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(Path.Combine(clone, "private-updater-child.ps1")) + " -Runtime " + Quote(runtime)) {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = clone, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        // The unchanged sponsor allowlist omits repository identity. After its
+        // actual-token/parent authentication, supply only this fixed nonsecret
+        // fixture scope; never copy credentials or broaden that shared policy.
+        start.EnvironmentVariables["GITHUB_REPOSITORY"] = "mrlevivel/TaskbarSelect";
+        using (var child = Process.Start(start)) {
+            int stdoutClosed = 0, stderrClosed = 0;
+            // Never relay raw child output: installer and profile logs may hold
+            // disposable account paths. Only bounded final schema is exported.
+            child.OutputDataReceived += delegate(object sender, DataReceivedEventArgs line) { if (line.Data == null) Interlocked.Exchange(ref stdoutClosed, 1); };
+            child.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs line) { if (line.Data == null) Interlocked.Exchange(ref stderrClosed, 1); };
+            child.BeginOutputReadLine(); child.BeginErrorReadLine();
+            Require(child.WaitForExit(150000));
+            Require(Wait(delegate { return Interlocked.CompareExchange(ref stdoutClosed, 0, 0) != 0 && Interlocked.CompareExchange(ref stderrClosed, 0, 0) != 0; }, 2000));
+            return child.ExitCode;
+        }
+    }
+}

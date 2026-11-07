@@ -1,0 +1,179 @@
+param()
+$ErrorActionPreference = 'Stop'
+# This account/token/installer test never runs on a developer or self-hosted PC.
+if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or
+    -not [Environment]::Is64BitProcess -or $PSVersionTable.PSEdition -cne 'Desktop' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$' -or
+    $env:GITHUB_REPOSITORY -cne 'mrlevivel/TaskbarSelect' -or $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or
+    $env:GITHUB_REF -cne 'refs/heads/codex/beta18-private-updater') {
+    throw 'A genuine disposable 64-bit GitHub-hosted Windows private updater workflow is required.'
+}
+if (-not $env:GITHUB_EVENT_PATH -or -not (Test-Path -LiteralPath $env:GITHUB_EVENT_PATH -PathType Leaf) -or
+    (Get-Item -LiteralPath $env:GITHUB_EVENT_PATH).Length -gt 2097152) { throw 'Bounded GitHub workflow event required.' }
+$event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+if ($event.repository.full_name -cne 'mrlevivel/TaskbarSelect' -or $event.repository.private -ne $true) { throw 'Only this still-private repository is admitted.' }
+function Read-ExactDispatchSwitch($value) {
+    if($null -eq $value){return $false}
+    if($value -is [bool]){return $value}
+    # GitHub's event JSON can encode workflow_dispatch inputs as strings.
+    if($value -is [string] -and $value -ceq 'true'){return $true}
+    if($value -is [string] -and $value -ceq 'false'){return $false}
+    throw 'A workflow switch has an unexpected type or value.'
+}
+$privateFlow=$true
+$allowUnsignedRun=Read-ExactDispatchSwitch $event.inputs.approve_run
+$metadataProbe=$false;$setupObservation=$false
+if(-not(Read-ExactDispatchSwitch $event.inputs.private_updater) -or -not(Read-ExactDispatchSwitch $event.inputs.execute_trial)){
+    throw 'Execution refused by default; dedicated private updater trial was not explicitly requested.'
+}
+$event = $null
+$repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')).TrimEnd('\')
+$temp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')
+foreach ($path in @($repo, $temp)) {
+    if (-not [IO.Path]::IsPathRooted($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) { throw 'Existing absolute hosted paths required.' }
+    for ($current = $path; $current; $current = [IO.Path]::GetDirectoryName($current.TrimEnd('\'))) {
+        if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse paths are refused.' }
+        if ($current.Length -eq 3) { break }
+    }
+}
+if (@(Get-Process -Name TaskbarSelect,AdministratorPayload,AdministratorBootstrap -ErrorAction SilentlyContinue).Count) { throw 'No existing app or helper is admitted.' }
+$appHash = '@TARGET_APP_SHA256@'
+$setupHash = '@TARGET_SETUP_SHA256@'
+$app = Join-Path $repo 'artifacts\TaskbarSelect.exe'
+$inputs = Join-Path $repo 'artifacts\private-updater-input'
+$inputApp = Join-Path $inputs 'TaskbarSelect.exe'
+$setup = Join-Path $inputs 'TaskbarSelect-1.0.0-beta.18-Setup.exe'
+foreach ($path in @($app, $inputApp)) {
+    if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $appHash -or
+        [Diagnostics.FileVersionInfo]::GetVersionInfo($path).ProductVersion -cne '1.0.0-beta.18') { throw 'The exact validated beta.18 candidate is required.' }
+}
+if ((Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant() -cne $setupHash) { throw 'The exact validated beta.18 Setup is required.' }
+$consentPath=Join-Path $inputs 'private-unsigned-warning-consent.json'
+$metadataModePath=Join-Path $inputs 'private-attachment-metadata-mode.json'
+$observationModePath=Join-Path $inputs 'private-setup-observation-mode.json'
+if(-not (Test-Path -LiteralPath $inputs -PathType Container)){throw 'Existing fixed private inputs required.'}
+for($current=$inputs;$current;$current=[IO.Path]::GetDirectoryName($current.TrimEnd('\'))){
+    if((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Private consent input ancestors cannot be reparse points.'}
+    if($current.Length -eq 3){break}
+}
+if(Test-Path -LiteralPath $consentPath){throw 'A private warning-consent input must never be reused.'}
+if(Test-Path -LiteralPath $metadataModePath){throw 'A private metadata-mode input must never be reused.'}
+if(Test-Path -LiteralPath $observationModePath){throw 'A private Setup-observation input must never be reused.'}
+if($setupObservation){
+    if($env:GITHUB_RUN_ID -cnotmatch '^[0-9]{1,20}$'){throw 'The exact hosted run identity is required for Setup observation.'}
+    $mode=[ordered]@{schema='taskbar-select-private-setup-observation-mode-v1';sourceSha=$env:GITHUB_SHA;runId=$env:GITHUB_RUN_ID;observationOnly=$true}
+    $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($mode|ConvertTo-Json -Compress))
+    if($bytes.Length -gt 4096){throw 'Setup observation mode exceeds its fixed bound.'}
+    $file=[IO.FileStream]::new($observationModePath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+    try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
+}
+if($metadataProbe){
+    if($env:GITHUB_RUN_ID -cnotmatch '^[0-9]{1,20}$'){throw 'The exact hosted run identity is required for metadata mode.'}
+    $mode=[ordered]@{schema='taskbar-select-private-attachment-metadata-mode-v1';sourceSha=$env:GITHUB_SHA;runId=$env:GITHUB_RUN_ID;metadataOnly=$true}
+    $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($mode|ConvertTo-Json -Compress))
+    if($bytes.Length -gt 4096){throw 'Metadata mode exceeds its fixed bound.'}
+    $file=[IO.FileStream]::new($metadataModePath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+    try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
+}
+if($allowUnsignedRun){
+    if($env:GITHUB_RUN_ID -cnotmatch '^[0-9]{1,20}$'){throw 'The exact hosted run identity is required for consent data.'}
+    if($env:GITHUB_RUN_ATTEMPT -cne '1'){throw 'A consented warning run must be a fresh dispatch, never a repeated job attempt.'}
+    # Data only. This file cannot dismiss a warning itself. A future matching
+    # fixture must independently authenticate the exact ordinary dialog and
+    # consume at most once. The normal workflow default creates no file.
+    $consent=[ordered]@{schema='taskbar-select-private-unsigned-warning-consent-v1';sourceSha=$env:GITHUB_SHA;setupSha256=$setupHash;runId=$env:GITHUB_RUN_ID;NormalOpenFileWarningOnly=$true;oneTime=$true}
+    $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($consent|ConvertTo-Json -Compress))
+    if($bytes.Length -gt 4096){throw 'Consent data exceeds its fixed bound.'}
+    $file=[IO.FileStream]::new($consentPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+    try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
+}
+$evidence = Join-Path $repo 'artifacts\private-updater-ci'
+$runtime = Join-Path $temp ('TaskbarSelect-private-updater-evidence-' + [Guid]::NewGuid().ToString('N'))
+if ((Test-Path -LiteralPath $evidence) -or (Test-Path -LiteralPath $runtime)) { throw 'A fresh disposable updater workspace is required.' }
+[void][IO.Directory]::CreateDirectory($evidence)
+$fixture = Join-Path $evidence 'PrivateUpdaterCiFixture.exe'
+Copy-Item -LiteralPath (Join-Path $inputs 'PrivateUpdaterCiFixture.exe') -Destination $fixture
+$start = New-Object Diagnostics.ProcessStartInfo
+$start.FileName = $fixture
+$start.Arguments = '--run-ci "' + $app + '" "' + $runtime + '"'
+$start.WorkingDirectory = $evidence
+$start.UseShellExecute = $false
+$start.CreateNoWindow = $true
+# Even the outer test launcher receives no Actions/GitHub bearer tokens.
+# Actual hosted/ref fields are copied from the validated real environment.
+$start.EnvironmentVariables.Clear()
+foreach ($name in @('SystemRoot', 'WINDIR', 'SystemDrive', 'PATH', 'RUNNER_TEMP', 'GITHUB_ACTIONS', 'RUNNER_ENVIRONMENT', 'RUNNER_OS', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_EVENT_NAME', 'GITHUB_RUN_ID', 'GITHUB_REPOSITORY')) {
+    $value = [Environment]::GetEnvironmentVariable($name)
+    if ($null -ne $value) { $start.EnvironmentVariables[$name] = $value }
+}
+$process = [Diagnostics.Process]::Start($start)
+try {
+    $null = $process.Handle
+    if (-not $process.WaitForExit(240000)) { throw 'Private updater wrapper exceeded four minutes; no successful cleanup claim.' }
+    $process.Refresh()
+    $launcher = Get-Content -LiteralPath (Join-Path $runtime 'launcher.json') -Raw | ConvertFrom-Json
+    $result = Get-Content -LiteralPath (Join-Path $runtime 'result.json') -Raw | ConvertFrom-Json
+    $probe = $launcher.Probe
+    # This is the only launcher export. No raw launcher receipt, log, profile,
+    # arbitrary exception text, user/SID, account credential or path is uploaded.
+    $runner = [ordered]@{
+        schema = 'taskbar-select-private-updater-runner-v1'; sourceSha = $env:GITHUB_SHA; exitCode = $process.ExitCode
+        targetAppSha256 = $appHash; targetSetupSha256 = $setupHash
+        chainPassed = ($probe.Status -ceq 'passed'); highGrantAuthenticated = [bool]$probe.HighHostedChainGrantAuthenticated
+        sourceMediumDuplicateVerified = [bool]$probe.SourceMediumDuplicateVerified; drained = [bool]$probe.Drained
+        remainingJobProcesses = $probe.RemainingJobProcesses; highExit = $probe.HighExit; sponsorExit = $probe.SponsorExit
+        protectedSourceRemoved = [bool]$probe.ProtectedSourceRemoved; accountRemoved = [bool]$launcher.AccountRemoved
+        cleanupUncertain = [bool]$launcher.CleanupUncertain; unknownHighLaunch = [bool]$probe.UnknownHighLaunch
+        unknownSponsorLaunch = [bool]$probe.UnknownSponsorLaunch; publicGitHubTested = $false; interactiveUacTested = $false
+        unsignedWarningConsentRequested = [bool]$allowUnsignedRun
+        metadataOnly = [bool]$metadataProbe
+        setupObservationOnly = [bool]$setupObservation
+    }
+    $runner | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'runner.json') -Encoding UTF8
+    # result.json is produced only by this fixed wrapper (or its fixed blocked
+    # fallback), and contains a fixed-schema message rather than child logs.
+    foreach ($name in @('result.json', 'private-updater-result.json')) {
+        $input = Join-Path $runtime $name
+        if (Test-Path -LiteralPath $input -PathType Leaf) {
+            if ((Get-Item -LiteralPath $input).Length -gt 65536 -or ((Get-Item -LiteralPath $input).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Updater receipt is not ordinary bounded evidence.' }
+            Copy-Item -LiteralPath $input -Destination (Join-Path $evidence $name)
+        }
+    }
+    $modePassed=if($setupObservation){$result.genuineMediumSetupObservationPassed -is [bool] -and $result.genuineMediumSetupObservationPassed -and $result.genuineMediumUpdaterPassed -is [bool] -and -not $result.genuineMediumUpdaterPassed -and $result.genuineMediumMetadataProbePassed -is [bool] -and -not $result.genuineMediumMetadataProbePassed}elseif($metadataProbe){$result.genuineMediumMetadataProbePassed -is [bool] -and $result.genuineMediumMetadataProbePassed -and $result.genuineMediumUpdaterPassed -is [bool] -and -not $result.genuineMediumUpdaterPassed -and $result.genuineMediumSetupObservationPassed -is [bool] -and -not $result.genuineMediumSetupObservationPassed}else{$result.genuineMediumUpdaterPassed -is [bool] -and $result.genuineMediumUpdaterPassed -and $result.genuineMediumMetadataProbePassed -is [bool] -and -not $result.genuineMediumMetadataProbePassed -and $result.genuineMediumSetupObservationPassed -is [bool] -and -not $result.genuineMediumSetupObservationPassed}
+    if ($process.ExitCode -ne 0 -or $result.status -cne 'passed' -or -not $modePassed -or
+        -not $runner.chainPassed -or -not $runner.highGrantAuthenticated -or -not $runner.sourceMediumDuplicateVerified -or
+        -not $runner.drained -or $runner.remainingJobProcesses -ne 0 -or $runner.highExit -ne 0 -or $runner.sponsorExit -ne 0 -or
+        -not $runner.protectedSourceRemoved -or -not $runner.accountRemoved -or $runner.cleanupUncertain -or $runner.unknownHighLaunch -or $runner.unknownSponsorLaunch) {
+        throw 'The admitted genuine MED diagnostic and confirmed complete owned drain are both required.'
+    }
+    $acceptance = Get-Content -LiteralPath (Join-Path $evidence 'private-updater-result.json') -Raw | ConvertFrom-Json
+    if($setupObservation){
+        if($acceptance.schema -cne 'taskbar-select-private-setup-observation-result-v1' -or $acceptance.status -cne 'observed' -or $acceptance.sourceSha -cne $env:GITHUB_SHA -or $acceptance.setupSha256 -cne $setupHash -or
+            $result.sourceSha -cne $env:GITHUB_SHA -or $result.appSha256 -cne $appHash -or $result.setupSha256 -cne $setupHash){throw 'Setup-observation diagnostic identity differs.'}
+        foreach($name in @('setupObservationOnly','observationCompleted','noInput','noInstallActions','observationHelperExited','observationHelperReceiptOwnerVerified','observationHelperHashVerified')){if($acceptance.$name -isnot [bool] -or -not $acceptance.$name){throw 'Setup-observation completion proof is missing.'}}
+        foreach($name in @('fullUpdateTested','updaterPassed','globalInput','securityDialogsAutomated')){if($acceptance.$name -isnot [bool] -or $acceptance.$name){throw 'Setup observation must not send input or install.'}}
+        foreach($name in @('launchAttempted','shellReturned','returnedProcessPresent','setupAuthenticated','setupExited','setupExitAvailable','shellCallPending','anyWindowEnabled','anyWindowDisabled','anyOwnedModal','anyPositiveSize','anyNonpositiveSize','wizardClassWrongTitle','otherClassExpectedTitle','controlReadFailed','boundsReached','zonePresentBefore','zonePresentAfter','zoneUnchanged','nextOnAnyControl','nextOnButton','nextCachedOnButton','noArrowNextOnAnyControl')){if($acceptance.$name -isnot [bool]){throw 'Setup-observation outcome type differs.'}}
+        if($acceptance.setupExit -isnot [int] -or $acceptance.helperHresult -isnot [int] -or $acceptance.helperStatus -cne 'observed' -or $acceptance.helperPhase -cne 'complete' -or
+            $acceptance.helperErrorType -isnot [string] -or $acceptance.helperErrorType -cnotmatch '^[A-Za-z0-9_.-]{1,80}$'){throw 'Setup-observation helper diagnostics differ.'}
+        $observationBounds=@{ownedDescendants=4;visibleWindows=8;visibleControls=128;classBits=255;titleBits=63;pageBits=255;buttonBits=255;enabledButtonBits=255;recognizedWizardWindows=8;elapsedMilliseconds=30000;frameworkFactsBits=32767;frameworkStableSamples=128;frameworkCandidateCount=8;buttonClassCount=128;buttonReadSuccessCount=128;buttonReadFailedCount=128}
+        foreach($name in $observationBounds.Keys){if($acceptance.$name -isnot [int] -or $acceptance.$name -lt 0 -or $acceptance.$name -gt $observationBounds[$name]){throw 'Setup-observation scalar exceeds its bound.'}}
+    }elseif($metadataProbe){
+        if($acceptance.schema -cne 'taskbar-select-private-attachment-metadata-result-v1' -or $acceptance.status -cne 'passed' -or $acceptance.sourceSha -cne $env:GITHUB_SHA){throw 'Metadata-only diagnostic identity differs.'}
+        foreach($name in @('metadataOnly','nonExecuting','cleanupConfirmed','metadataHelperExited','metadataHelperReceiptOwnerVerified','metadataHelperHashVerified')){if($acceptance.$name -isnot [bool] -or -not $acceptance.$name){throw 'Metadata-only completion proof is missing.'}}
+        foreach($name in @('fullUpdateTested','executeApiCalled','promptApiCalled','saveWithUiApiCalled')){if($acceptance.$name -isnot [bool] -or $acceptance.$name){throw 'Metadata-only mode must not execute or prompt.'}}
+        foreach($prefix in @('baseline','contentPin','contentAndZonePin','afterZoneRelease')){
+            if($acceptance.($prefix+'Hresult') -isnot [int] -or $acceptance.($prefix+'SaveCalled') -isnot [bool] -or -not $acceptance.($prefix+'SaveCalled')){throw 'All bounded nonexecuting metadata arms are required.'}
+            foreach($suffix in @('FilePresent','ContentsUnchanged','Zone3Retained','ZoneChanged')){if($acceptance.($prefix+$suffix) -isnot [bool]){throw 'Metadata outcome type differs.'}}
+        }
+    }elseif ($acceptance.schema -cne 'taskbar-select-private-update-e2e-v1' -or $acceptance.status -cne 'passed' -or
+        $acceptance.sourceSha -cne $env:GITHUB_SHA -or $acceptance.appSha256 -cne $appHash -or $acceptance.setupSha256 -cne $setupHash -or
+        -not $acceptance.settingsPreserved -or -not $acceptance.reopenedExactTarget -or -not $acceptance.cleanupConfirmed -or
+        -not $acceptance.sourceBuiltPredecessor -or $acceptance.exactReleasedBeta17 -or $acceptance.publicGitHubTested -or
+        $result.sourceSha -cne $env:GITHUB_SHA -or $result.appSha256 -cne $appHash -or $result.setupSha256 -cne $setupHash -or $result.publicGitHubTested) {
+        throw 'Private update acceptance or exact-artifact/source binding differs.'
+    }
+    if ((Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash.ToLowerInvariant() -cne $appHash -or
+        (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant() -cne $setupHash) { throw 'Original exact artifacts changed during private acceptance.' }
+    if($setupObservation){Write-Output 'PASS: Genuine MED ordinary Setup observation completed with zero input/install actions and confirmed outer owned drain. No full updater, natural Setup exit or settings retention acceptance is claimed.'}
+    elseif($metadataProbe){Write-Output 'PASS: Genuine MED nonexecuting inert-text attachment metadata comparison completed with owned cleanup. No updater, Setup, permission prompt, or full-update acceptance is claimed.'}
+    else{Write-Output 'PASS: Genuine MED candidate-source beta17-version predecessor through exact beta.18 Setup and reopen, with synthetic settings preserved and owned cleanup confirmed. Exact released beta17 updater, anonymous public GitHub/TLS/CDN, interactive UAC and reboot remain separate.'}
+} finally { $process.Dispose() }

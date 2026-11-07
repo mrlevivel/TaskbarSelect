@@ -1,0 +1,462 @@
+param([Parameter(Mandatory=$true)][string]$Runtime,[Parameter(Mandatory=$true)][string]$Inputs)
+$ErrorActionPreference = 'Stop'
+# Never spoof these fields, invoke locally, or run against an existing account.
+# The external authenticated sponsor chain admits one fresh actual MED account.
+if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or
+    -not [Environment]::Is64BitProcess -or $PSVersionTable.PSEdition -cne 'Desktop' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$' -or
+    $env:GITHUB_REPOSITORY -cne 'mrlevivel/TaskbarSelect' -or $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or
+    $env:GITHUB_REF -cne 'refs/heads/codex/beta18-private-updater') { throw 'Genuine disposable hosted Windows PowerShell MED child only.' }
+$Runtime = [IO.Path]::GetFullPath($Runtime).TrimEnd('\'); $Inputs = [IO.Path]::GetFullPath($Inputs).TrimEnd('\')
+if ([IO.Path]::GetFileName($Runtime) -cnotmatch '^TaskbarSelectCiRuntime\.[a-f0-9]{32}$' -or
+    $Inputs -cne (Join-Path $Runtime 'private-updater-input') -or $env:RUNNER_TEMP.TrimEnd('\') -cne $Runtime) { throw 'Fixed fresh owned CI runtime and input clone required.' }
+function Ordinary([string]$path) { for ($current=$path; $current; $current=[IO.Path]::GetDirectoryName($current.TrimEnd('\'))) { if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Owned test paths cannot contain reparse points.' }; if($current.Length -eq 3){break} } }
+function Hash([string]$path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Require($value,[string]$name) { if(-not $value){throw ('Private update predicate: '+$name)}; $script:checks++ }
+function Budget([int]$requested) { $remaining=140000-[int]$script:totalClock.ElapsedMilliseconds; if($remaining -le 0){throw 'Private updater global deadline reached; no forced cleanup.'};[Math]::Min($requested,$remaining) }
+function Same([string]$a,[string]$b) { [String]::Equals([IO.Path]::GetFullPath($a).TrimEnd('\'),[IO.Path]::GetFullPath($b).TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase) }
+function Registration { $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey('CurrentUser','Registry64');try{return $base.OpenSubKey($registrationPath)}finally{$base.Dispose()} }
+function NoneRunning { $all=@(Get-Process -Name TaskbarSelect,AdministratorPayload,AdministratorBootstrap -ErrorAction SilentlyContinue);try{Require ($all.Count -eq 0) 'no existing controller/helper'}finally{foreach($p in $all){$p.Dispose()}} }
+function RunBounded([string]$path,[string[]]$arguments,[int]$deadline,[string]$label) {
+    $deadline=Budget $deadline
+    $p=Start-Process -FilePath $path -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    try{$null=$p.Handle;Require ($p.WaitForExit($deadline)) ($label+' bounded exit');$p.Refresh();Require ($p.ExitCode -eq 0) ($label+' successful exit')}finally{$p.Dispose()}
+}
+function StartExactGui([string]$path) {
+    NoneRunning
+    $null=Budget 1
+    $p=Start-Process -FilePath $path -WindowStyle Normal -PassThru;$null=$p.Handle;$started=$p.StartTime.ToUniversalTime().Ticks
+    $watch=[Diagnostics.Stopwatch]::StartNew();$ready=$false
+    while($watch.ElapsedMilliseconds -lt 12000){$null=Budget 1;$p.Refresh();if($p.HasExited){break};if($p.Responding -and $p.WaitForInputIdle(0)){$ready=$true;break};Start-Sleep -Milliseconds 100}
+    Require $ready 'exact upgraded GUI responsive';Require ((Same $p.MainModule.FileName $path) -and $p.StartTime.ToUniversalTime().Ticks -eq $started) 'exact upgraded GUI owner and epoch'
+    return $p
+}
+function StopExactGui($gui,[string]$path) { RunBounded $path @('--restore') 10000 'normal restore';Require ($gui.WaitForExit(2000)) 'owned GUI stopped normally';$gui.Dispose();NoneRunning }
+function ReadHostReceipt {
+    if(-not $fixtureReceipt -or -not (Test-Path -LiteralPath $fixtureReceipt -PathType Leaf)){return $null}
+    Ordinary ([IO.Path]::GetDirectoryName($fixtureReceipt))
+    if([IO.File]::GetAttributes($fixtureReceipt) -band [IO.FileAttributes]::ReparsePoint){throw 'Owned receipt must be an ordinary file.'}
+    # The host publishes with File.Replace. Permit delete sharing so a reader
+    # cannot make that atomic publication fail during a polling overlap.
+    $stream=[IO.FileStream]::new($fixtureReceipt,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try {
+        if($stream.Length -le 0 -or $stream.Length -gt 65536){throw 'Bounded host receipt required.'}
+        $reader=[IO.StreamReader]::new($stream,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
+        try{return ($reader.ReadToEnd()|ConvertFrom-Json)}finally{$reader.Dispose()}
+    }finally{$stream.Dispose()}
+}
+function IsTransientHostRead($exception) {
+    $base=$exception.GetBaseException()
+    # A neutral File.Replace race reproduced only ERROR_FILE_NOT_FOUND and
+    # ERROR_SHARING_VIOLATION while opening this one fixed owned receipt.
+    # Do not hide invalid JSON, access denial, unsafe paths or other failures.
+    return ($base -is [IO.IOException] -and $base.HResult -in @(-2147024894,-2147024864))
+}
+function DiagnosticInteger($value,[bool]$nonnegative=$false) {
+    if(($value -isnot [int] -and $value -isnot [long]) -or $value -lt [int]::MinValue -or $value -gt [int]::MaxValue -or ($nonnegative -and $value -lt 0)){throw 'Unexpected diagnostic numeric value.'}
+    return [int]$value
+}
+function DiagnosticType($value) {
+    if($value -isnot [string] -or $value -cnotmatch '^[A-Za-z0-9_.-]{1,80}$'){throw 'Unexpected diagnostic type identifier.'}
+    return $value
+}
+function NewWarningInputTelemetry {
+    $value=[ordered]@{version=1;phase=0;revision=0;sequenceOutcome=0;moveEvents=0;buttonEvents=0;pointerSamples=0}
+    foreach($field in @('virtualX','virtualY','virtualWidth','virtualHeight','runLeft','runTop','runRight','runBottom','intendedX','intendedY','normalizedX','normalizedY','clipLeft','clipTop','clipRight','clipBottom','moveX','moveY','postX','postY','preflightMs','consumedMs','moveStartedMs','moveReturnedMs','pointerMs','proofMs','buttonsStartedMs','buttonsReturnedMs','postMs')){$value[$field]=0}
+    foreach($field in @('clipQuerySucceeded','intendedInsideClip','moveCallStarted','moveReturned','moveCursorQuerySucceeded','moveInsideRun','moveHitOwnedRun','moveHitOwnedWarning','pointerVerified','finalProofObserved','finalProofVerified','proofClipQuerySucceeded','proofClipAllowsPoint','buttonsCallStarted','buttonsReturned','postCursorQuerySucceeded','postEqualsIntended','postInsideRun','postHitOwnedRun','postHitOwnedWarning','warningStillPresent')){$value[$field]=$false}
+    return [pscustomobject]$value
+}
+function WarningPointInside([long]$left,[long]$top,[long]$right,[long]$bottom,[long]$x,[long]$y) {
+    return ($right -gt $left -and $bottom -gt $top -and $x -ge $left -and $x -lt $right -and $y -ge $top -and $y -lt $bottom)
+}
+function ValidatedWarningInputTelemetry($raw,[bool]$attempted) {
+    $empty=NewWarningInputTelemetry
+    $expected=@($empty.PSObject.Properties.Name|Sort-Object)
+    if($raw -isnot [pscustomobject] -or @($raw.PSObject.Properties).Count -ne $expected.Count -or
+       @(Compare-Object -ReferenceObject $expected -DifferenceObject @($raw.PSObject.Properties.Name|Sort-Object) -CaseSensitive).Count){throw 'Unexpected pointer telemetry schema.'}
+    $copy=[ordered]@{}
+    foreach($property in $empty.PSObject.Properties){
+        $field=$property.Name
+        if($property.Value -is [bool]){if($raw.$field -isnot [bool]){throw 'Unexpected pointer telemetry Boolean.'};$copy[$field]=$raw.$field}
+        else{$copy[$field]=DiagnosticInteger $raw.$field}
+    }
+    $t=[pscustomobject]$copy
+    if($t.version -ne 1 -or $t.phase -lt 0 -or $t.phase -gt 7 -or $t.revision -lt 0 -or $t.revision -gt 4096 -or
+       $t.sequenceOutcome -lt 0 -or $t.sequenceOutcome -gt 7 -or $t.moveEvents -lt 0 -or $t.moveEvents -gt 1 -or
+       $t.buttonEvents -lt 0 -or $t.buttonEvents -gt 2 -or $t.pointerSamples -lt 0 -or $t.pointerSamples -gt 32){throw 'Pointer telemetry bounds differ.'}
+    $times=@('preflightMs','consumedMs','moveStartedMs','moveReturnedMs','pointerMs','proofMs','buttonsStartedMs','buttonsReturnedMs','postMs')
+    foreach($field in $times){if($t.$field -lt 0 -or $t.$field -gt 300000){throw 'Pointer telemetry time exceeds its bound.'}}
+    if($t.phase -eq 0){
+        foreach($property in $empty.PSObject.Properties){if($t.($property.Name) -cne $property.Value){throw 'Unobserved pointer telemetry is not empty.'}}
+        if($attempted){throw 'Attempted input is missing its pointer telemetry.'};return $t
+    }
+    if($t.revision -eq 0 -or $attempted -ne ($t.phase -ge 2)){throw 'Pointer telemetry attempt phase differs.'}
+    if(($t.phase -lt 3 -and $t.moveReturned) -or ($t.phase -lt 4 -and $t.pointerSamples -gt 0) -or
+       ($t.phase -lt 5 -and $t.finalProofObserved) -or ($t.phase -lt 6 -and $t.buttonsReturned) -or
+       ($t.phase -eq 3 -and -not $t.moveReturned) -or ($t.phase -eq 4 -and $t.pointerSamples -eq 0) -or
+       ($t.phase -eq 5 -and -not $t.finalProofObserved) -or ($t.phase -eq 6 -and -not $t.buttonsReturned)){throw 'Pointer telemetry publication phase differs.'}
+    $width=[long]$t.runRight-[long]$t.runLeft;$height=[long]$t.runBottom-[long]$t.runTop
+    $vw=[long]$t.virtualWidth;$vh=[long]$t.virtualHeight
+    if($width -lt 8 -or $width -gt 4096 -or $height -lt 8 -or $height -gt 4096 -or $vw -lt 2 -or $vw -gt 32768 -or $vh -lt 2 -or $vh -gt 32768 -or
+       [long]$t.runLeft -lt [long]$t.virtualX -or [long]$t.runTop -lt [long]$t.virtualY -or
+       [long]$t.runRight -gt ([long]$t.virtualX+$vw) -or [long]$t.runBottom -gt ([long]$t.virtualY+$vh) -or
+       [long]$t.intendedX -ne ([long]$t.runLeft+[long][Math]::Floor($width/2)) -or
+       [long]$t.intendedY -ne ([long]$t.runTop+[long][Math]::Floor($height/2))){throw 'Pointer geometry differs.'}
+    $rx=[long]$t.intendedX-[long]$t.virtualX;$ry=[long]$t.intendedY-[long]$t.virtualY
+    $nx=[long][Math]::Floor(($rx*65535+[Math]::Floor(($vw-1)/2))/($vw-1))
+    $ny=[long][Math]::Floor(($ry*65535+[Math]::Floor(($vh-1)/2))/($vh-1))
+    if($rx -lt 0 -or $rx -ge $vw -or $ry -lt 0 -or $ry -ge $vh -or $t.normalizedX -lt 0 -or $t.normalizedX -gt 65535 -or
+       $t.normalizedY -lt 0 -or $t.normalizedY -gt 65535 -or $t.normalizedX -ne $nx -or $t.normalizedY -ne $ny){throw 'Pointer normalization differs.'}
+    if($t.clipQuerySucceeded){
+        if([long]$t.clipRight -le [long]$t.clipLeft -or [long]$t.clipBottom -le [long]$t.clipTop){throw 'Pointer clip rectangle differs.'}
+        $inside=WarningPointInside $t.clipLeft $t.clipTop $t.clipRight $t.clipBottom $t.intendedX $t.intendedY
+        if($t.intendedInsideClip -ne $inside){throw 'Pointer clip relation differs.'}
+    }elseif($t.intendedInsideClip -or $t.clipLeft -ne 0 -or $t.clipTop -ne 0 -or $t.clipRight -ne 0 -or $t.clipBottom -ne 0){throw 'Unknown pointer clip has data.'}
+    if($attempted -and (-not $t.clipQuerySucceeded -or -not $t.intendedInsideClip -or $t.consumedMs -lt $t.preflightMs)){throw 'Consumed input lacked a reachable clip proof.'}
+    if(-not $attempted -and (@($times|Where-Object {$_ -cne 'preflightMs' -and $t.$_ -ne 0}).Count -or $t.moveCallStarted -or $t.moveReturned -or $t.moveEvents -ne 0 -or $t.pointerSamples -ne 0 -or $t.finalProofObserved -or $t.buttonsCallStarted -or $t.buttonsReturned -or $t.buttonEvents -ne 0 -or $t.sequenceOutcome -ne 0)){throw 'Preflight telemetry claims an action.'}
+    if($t.moveCallStarted){if(-not $attempted -or $t.moveStartedMs -lt $t.consumedMs){throw 'Move timing differs.'}}
+    elseif($t.moveReturned -or $t.moveStartedMs -ne 0){throw 'Move was not started.'}
+    if($t.moveReturned){if(-not $t.moveCallStarted -or $t.moveReturnedMs -lt $t.moveStartedMs){throw 'Move return differs.'}}
+    elseif($t.moveEvents -ne 0 -or $t.moveReturnedMs -ne 0){throw 'Unknown move return claims events.'}
+    if($t.moveCursorQuerySucceeded){
+        # The gating move sample excludes a one-pixel border; the post-input
+        # diagnostic below reports ordinary containment in the original rect.
+        $inside=([long]$t.moveX -gt [long]$t.runLeft -and [long]$t.moveX -lt ([long]$t.runRight-1) -and
+            [long]$t.moveY -gt [long]$t.runTop -and [long]$t.moveY -lt ([long]$t.runBottom-1))
+        if($t.moveInsideRun -ne $inside){throw 'Move pointer relation differs.'}
+    }elseif($t.moveX -ne 0 -or $t.moveY -ne 0 -or $t.moveInsideRun -or $t.moveHitOwnedRun -or $t.moveHitOwnedWarning){throw 'Unavailable move pointer has data.'}
+    if($t.moveHitOwnedRun -and -not $t.moveHitOwnedWarning){throw 'Move hit ownership differs.'}
+    if($t.pointerVerified -ne ($t.moveCursorQuerySucceeded -and $t.moveInsideRun -and $t.moveHitOwnedRun)){throw 'Pointer arrival proof differs.'}
+    if($t.pointerSamples -gt 0){if(-not $t.moveReturned -or $t.moveEvents -ne 1 -or $t.pointerMs -lt $t.moveReturnedMs){throw 'Pointer sample timing differs.'}}
+    elseif($t.pointerMs -ne 0 -or $t.moveCursorQuerySucceeded -or $t.pointerVerified){throw 'Pointer was not sampled.'}
+    if($t.finalProofObserved){if(-not $t.pointerVerified -or $t.proofMs -lt $t.pointerMs){throw 'Fresh proof timing differs.'}}
+    elseif($t.proofMs -ne 0 -or $t.finalProofVerified -or $t.proofClipQuerySucceeded -or $t.proofClipAllowsPoint){throw 'Fresh proof was not observed.'}
+    if($t.proofClipAllowsPoint -and -not $t.proofClipQuerySucceeded){throw 'Fresh clip query differs.'}
+    if($t.finalProofVerified -and (-not $t.pointerVerified -or -not $t.proofClipAllowsPoint)){throw 'Fresh proof lacked an owned reachable pointer.'}
+    if($t.buttonsCallStarted){if(-not $t.finalProofVerified -or $t.buttonsStartedMs -lt $t.proofMs){throw 'Button timing differs.'}}
+    elseif($t.buttonsStartedMs -ne 0 -or $t.buttonsReturned){throw 'Buttons were not started.'}
+    if($t.buttonsReturned){if(-not $t.buttonsCallStarted -or $t.buttonsReturnedMs -lt $t.buttonsStartedMs){throw 'Button return differs.'}}
+    elseif($t.buttonEvents -ne 0 -or $t.buttonsReturnedMs -ne 0){throw 'Unknown button return claims events.'}
+    if($t.postCursorQuerySucceeded){
+        $inside=WarningPointInside $t.runLeft $t.runTop $t.runRight $t.runBottom $t.postX $t.postY
+        if($t.postEqualsIntended -ne ($t.postX -eq $t.intendedX -and $t.postY -eq $t.intendedY) -or $t.postInsideRun -ne $inside){throw 'Post-input pointer relation differs.'}
+    }elseif($t.postX -ne 0 -or $t.postY -ne 0 -or $t.postEqualsIntended -or $t.postInsideRun -or $t.postHitOwnedRun -or $t.postHitOwnedWarning){throw 'Unavailable post-input pointer has data.'}
+    if($t.postHitOwnedRun -and -not $t.postHitOwnedWarning){throw 'Post-input hit ownership differs.'}
+    if($t.phase -eq 7){
+        if($t.sequenceOutcome -eq 0 -or @($times|Where-Object {$_ -cne 'postMs' -and $t.$_ -gt $t.postMs}).Count){throw 'Post-input timing differs.'}
+    }elseif($t.postMs -ne 0 -or $t.postCursorQuerySucceeded -or $t.postEqualsIntended -or $t.postInsideRun -or $t.postHitOwnedRun -or $t.postHitOwnedWarning -or $t.warningStillPresent){throw 'Post-input observation is not complete.'}
+    return $t
+}
+function CopyWarningInputTelemetry($observation) {
+    # Core consumed-attempt evidence is copied before this optional diagnostic
+    # validation. Malformed telemetry cannot make a used grant appear unused.
+    try {
+        $t=ValidatedWarningInputTelemetry $observation.warningInputTelemetry $observation.normalUnsignedWarningInputAttempted
+        if($t.moveEvents+$t.buttonEvents -ne $observation.warningInputEventsInserted){throw 'Input counts differ.'}
+        $old=$result.warningInputTelemetry
+        if($t.revision -lt $old.revision){return}
+        if($t.revision -eq $old.revision){
+            foreach($property in $old.PSObject.Properties){if($t.($property.Name) -cne $property.Value){throw 'Pointer telemetry revision changed.'}};return
+        }
+        if($t.phase -lt $old.phase){throw 'Pointer telemetry phase moved backwards.'}
+        if($old.phase -ge 2){
+            foreach($field in @('virtualX','virtualY','virtualWidth','virtualHeight','runLeft','runTop','runRight','runBottom','intendedX','intendedY','normalizedX','normalizedY','clipLeft','clipTop','clipRight','clipBottom','clipQuerySucceeded','intendedInsideClip','preflightMs','consumedMs')){if($t.$field -cne $old.$field){throw 'Consumed pointer geometry changed.'}}
+            foreach($field in @('moveCallStarted','moveReturned','finalProofObserved','buttonsCallStarted','buttonsReturned')){if($old.$field -and -not $t.$field){throw 'Consumed pointer stage disappeared.'}}
+        }
+        $result.warningInputTelemetry=$t
+    }catch{$result.warningInputTelemetryInvalid=$true;$result.normalUnsignedWarningProofInvalid=$true}
+}
+function CaptureNormalWarningProof($observation) {
+    if($null -eq $observation){return}
+    foreach($field in @('normalUnsignedWarningConsentPresent','normalUnsignedWarningConsentValidated','normalUnsignedWarningEligible','normalUnsignedWarningAccepted',
+        'warningUiaPatternAvailable','warningUiaInvokeAttempted','warningUiaInvokeReturned','warningUiaSessionVerified','warningUiaDesktopVerified','warningUiaOwnerVerified','warningUiaMarkerWritten','warningUiaFinalFencePassed')){
+        if($observation.$field -isnot [bool]){throw 'Invalid UIA warning receipt Boolean.'}
+        $result[$field]=[bool]($result[$field] -or $observation.$field)
+    }
+    $count=DiagnosticInteger $observation.normalUnsignedWarningRunCount $true
+    if($count -gt 1){throw 'UIA warning action must be single use.'}
+    $result.normalUnsignedWarningRunCount=[Math]::Max($result.normalUnsignedWarningRunCount,$count)
+    $method=$observation.normalUnsignedWarningActionMethod
+    if($method -isnot [string] -or $method -cnotin @('None','UIAInvoke')){throw 'Non-UIA warning action is forbidden.'}
+    if($method -ceq 'UIAInvoke'){$result.normalUnsignedWarningActionMethod=$method}
+    if($observation.normalUnsignedWarningInputAttempted -or $observation.normalUnsignedWarningRunPosted -or $observation.normalUnsignedWarningSendAttempted -or
+        $observation.warningInputEventsInserted -ne 0){throw 'Fallback security input is forbidden.'}
+    if($observation.warningUiaInvokeAttempted){
+        $result.securityDialogsAutomated=$true
+        if($count -ne 1 -or $method -cne 'UIAInvoke' -or -not $consentInputValidated -or
+            -not $observation.normalUnsignedWarningConsentValidated -or -not $observation.normalUnsignedWarningEligible -or
+            -not $observation.warningUiaPatternAvailable -or -not $observation.warningUiaMarkerWritten -or -not $observation.warningUiaFinalFencePassed -or
+            -not $observation.warningUiaSessionVerified -or -not $observation.warningUiaDesktopVerified -or -not $observation.warningUiaOwnerVerified){
+            $result.normalUnsignedWarningProofInvalid=$true
+        }
+    }
+}
+function CaptureHostDiagnostic {
+    try {
+        try{$hostReceipt=ReadHostReceipt}catch{if((IsTransientHostRead $_.Exception) -and $lastHostReceipt){$hostReceipt=$lastHostReceipt}else{throw}}
+        if($null -eq $hostReceipt){return}
+        $result.hostReceiptAvailable=$true
+        if($hostReceipt.schema -cne 'taskbar-select-private-update-fixture-v1'){throw 'Unexpected host receipt schema.'}
+        if($hostReceipt.status -cnotin @('running','launched','failed')){throw 'Unexpected host receipt status.'}
+        $result.hostStatus=$hostReceipt.status
+        if($hostReceipt.phase -isnot [string] -or $hostReceipt.phase -cnotmatch '^[A-Za-z0-9_.-]{1,80}$'){throw 'Unexpected host phase identifier.'}
+        $result.hostPhase=$hostReceipt.phase
+        if($hostReceipt.errorType){if($hostReceipt.errorType -isnot [string] -or $hostReceipt.errorType -cnotmatch '^[A-Za-z0-9_.-]{1,80}$'){throw 'Unexpected host error identifier.'};$result.hostErrorType=$hostReceipt.errorType}
+        if($hostReceipt.hresult -isnot [int] -and $hostReceipt.hresult -isnot [long]){throw 'Unexpected host numeric error.'}
+        $result.hostHresult=[int]$hostReceipt.hresult
+        if($fixtureProcess -and $fixtureStarted -and $hostReceipt.fixturePid -eq $fixtureProcess.Id -and $hostReceipt.fixtureStartedUtcTicks -eq $fixtureStarted){
+            $result.hostReceiptOwnerVerified=$true
+            foreach($proof in @('checkedFeed','downloaded','realStaging','declinedInstallConfirmed','confirmedInstall','intermediateProgressObserved')){
+                if($hostReceipt.$proof -isnot [bool]){throw 'Unexpected host proof type.'}
+                $result[$proof]=[bool]$hostReceipt.$proof
+            }
+            $booleanFields=@{stage5Busy='hostStage5Busy';stage5Closing='hostStage5Closing';stage5ActiveLaunch='hostStage5ActiveLaunch';stage5Launching='hostStage5Launching';afterYesClickReturned='hostAfterYesClickReturned'}
+            foreach($field in $booleanFields.Keys){if($hostReceipt.$field -isnot [bool]){throw 'Unexpected host observation type.'};$result[$booleanFields[$field]]=[bool]$hostReceipt.$field}
+            if($hostReceipt.stage5UiState -cnotin @('None','VerificationOrShellWait','SetupOpening','GenericLaunchFailure','ApprovalRejected','Other')){throw 'Unexpected host UI category.'}
+            $result.hostStage5UiState=$hostReceipt.stage5UiState
+            $result.hostTimerTicks=DiagnosticInteger $hostReceipt.timerTicks $true
+            $result.hostLaunchExceptionType=DiagnosticType $hostReceipt.launchExceptionType
+            $result.hostLaunchExceptionHresult=DiagnosticInteger $hostReceipt.launchExceptionHresult
+            $result.hostLaunchNativeError=DiagnosticInteger $hostReceipt.launchNativeError
+            $result.hostLaunchExceptionCount=DiagnosticInteger $hostReceipt.launchExceptionCount $true
+            CaptureNormalWarningProof $hostReceipt
+        }
+    }catch {
+        # Diagnostics must never overwrite the original failure or export raw
+        # exception messages, filenames, PIDs, settings, or account details.
+        $result.hostStatus='Invalid';$result.hostErrorType='InvalidReceipt';$result.hostHresult=0
+    }
+}
+function ReadWatchdogReceipt {
+    $path=Join-Path $Runtime 'private-fixture-watchdog.json'
+    if(-not (Test-Path -LiteralPath $path -PathType Leaf)){return $null}
+    Ordinary $Runtime
+    if([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint){throw 'Owned watchdog receipt must be an ordinary file.'}
+    $stream=[IO.FileStream]::new($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try{
+        if($stream.Length -le 0 -or $stream.Length -gt 65536){throw 'Bounded watchdog receipt required.'}
+        $reader=[IO.StreamReader]::new($stream,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
+        try{return ($reader.ReadToEnd()|ConvertFrom-Json)}finally{$reader.Dispose()}
+    }finally{$stream.Dispose()}
+}
+function CaptureWatchdogDiagnostic {
+    try {
+        $watch=$null
+        for($attempt=0;$attempt -lt 4;$attempt++){
+            try{$watch=ReadWatchdogReceipt;break}catch{if(IsTransientHostRead $_.Exception){$result.watchStatus='TransientUnavailable';if($attempt -lt 3){Start-Sleep -Milliseconds 20;continue};return};throw}
+        }
+        if($null -eq $watch){return}
+        $result.watchReceiptAvailable=$true
+        if($watch.schema -cne 'taskbar-select-private-update-watchdog-v1' -or -not $fixtureProcess -or -not $fixtureStarted -or $watch.fixturePid -ne $fixtureProcess.Id -or $watch.fixtureStartedUtcTicks -ne $fixtureStarted){throw 'Watchdog receipt ownership or schema differs.'}
+        $result.watchReceiptOwnerVerified=$true
+        $booleanFields=@{afterYesClickReturned='watchAfterYesClickReturned';stage5Launching='watchStage5Launching';stage5ActiveLaunch='watchStage5ActiveLaunch';dialogEnumerationTruncated='watchDialogEnumerationTruncated'}
+        foreach($field in $booleanFields.Keys){if($watch.$field -isnot [bool]){throw 'Unexpected watchdog observation type.'};$result[$booleanFields[$field]]=[bool]$watch.$field}
+        $counterFields=@{sample='watchSample';stage='watchStage';timerTicks='watchTimerTicks';installDialogCount='watchInstallDialogCount';securityDialogCount='watchSecurityDialogCount';unknownDialogCount='watchUnknownDialogCount';unresponsiveDialogCount='watchUnresponsiveDialogCount';launchExceptionCount='watchLaunchExceptionCount'}
+        foreach($field in $counterFields.Keys){$result[$counterFields[$field]]=DiagnosticInteger $watch.$field $true}
+        $result.watchLaunchExceptionType=DiagnosticType $watch.launchExceptionType
+        $result.watchLaunchExceptionHresult=DiagnosticInteger $watch.launchExceptionHresult
+        $result.watchLaunchNativeError=DiagnosticInteger $watch.launchNativeError
+        CaptureNormalWarningProof $watch
+        $result.watchStatus='Observed'
+    }catch{
+        $result.watchStatus='Invalid'
+    }
+}
+function ReadWizardReceipt {
+    $path=Join-Path $Runtime 'wizard-receipt.json'
+    if(-not (Test-Path -LiteralPath $path -PathType Leaf)){return $null}
+    Ordinary $Runtime
+    if([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint){throw 'Owned wizard receipt must be an ordinary file.'}
+    $stream=[IO.FileStream]::new($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try{
+        if($stream.Length -le 0 -or $stream.Length -gt 65536){throw 'Bounded wizard receipt required.'}
+        $reader=[IO.StreamReader]::new($stream,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
+        try{return ($reader.ReadToEnd()|ConvertFrom-Json)}finally{$reader.Dispose()}
+    }finally{$stream.Dispose()}
+}
+function Copy-WizardCheckpoint($wizard, $destination) {
+    if(($wizard.checkpoint -isnot [int] -and $wizard.checkpoint -isnot [long]) -or $wizard.checkpoint -lt 0 -or $wizard.checkpoint -gt 64){throw 'Wizard checkpoint must be a bounded integer.'}
+    if($wizard.observedPage -isnot [string] -or $wizard.observedPage -cnotin @('None','welcome','destination','tasks','ready','installing','complete','unknown')){throw 'Wizard observed page is not a fixed identifier.'}
+    if(($wizard.readyPathControlCount -isnot [int] -and $wizard.readyPathControlCount -isnot [long]) -or $wizard.readyPathControlCount -lt 0 -or $wizard.readyPathControlCount -gt 8){throw 'Wizard destination control count exceeds its bound.'}
+    foreach($name in @('readyDestinationVerified','readyDestinationFromControl','readyDestinationFromRegistration')){if($wizard.$name -isnot [bool]){throw 'Wizard destination proof must be Boolean.'}}
+    if($wizard.readyDestinationVerified -ne ($wizard.readyDestinationFromControl -or $wizard.readyDestinationFromRegistration)){throw 'Wizard destination proof flags disagree.'}
+    if($wizard.readyDestinationFromControl -and $wizard.readyPathControlCount -ne 1){throw 'Wizard native destination proof is not unique.'}
+    if($wizard.readyDestinationFromRegistration -and $wizard.readyPathControlCount -ne 0){throw 'Wizard registered destination cannot override a native control.'}
+    $destination.wizardCheckpoint=[int]$wizard.checkpoint
+    $destination.wizardObservedPage=$wizard.observedPage
+    $destination.wizardReadyPathControlCount=[int]$wizard.readyPathControlCount
+    $destination.wizardReadyDestinationVerified=$wizard.readyDestinationVerified
+    $destination.wizardReadyDestinationFromControl=$wizard.readyDestinationFromControl
+    $destination.wizardReadyDestinationFromRegistration=$wizard.readyDestinationFromRegistration
+}
+function CaptureWizardDiagnostic {
+    try{
+        $wizard=$null
+        for($attempt=0;$attempt -lt 4;$attempt++){
+            try{$wizard=ReadWizardReceipt;break}catch{if(IsTransientHostRead $_.Exception){$result.wizardStatus='TransientUnavailable';if($attempt -lt 3){Start-Sleep -Milliseconds 20;continue};return};throw}
+        }
+        if($null -eq $wizard){return}
+        if($wizard.schema -cne 'taskbar-select-private-update-wizard-v1' -or $wizard.status -cnotin @('passed','failed') -or $wizard.phase -cnotin @('admission','pin-setup','wizard','passed')){throw 'Unexpected wizard receipt schema or phase.'}
+        $result.wizardStatus=$wizard.status;$result.wizardPhase=$wizard.phase
+        Copy-WizardCheckpoint $wizard $result
+        if($wizard.status -ceq 'passed' -and $wizard.setupSha256 -cne $result.setupSha256){throw 'Passed wizard receipt Setup identity differs.'}
+        if($wizard.PSObject.Properties['errorType']){$result.wizardErrorType=DiagnosticType $wizard.errorType}
+        if($wizard.PSObject.Properties['hresult']){$result.wizardHresult=DiagnosticInteger $wizard.hresult}
+        $result.wizardButtons=DiagnosticInteger $wizard.buttons $true
+        if($wizard.PSObject.Properties['unknownWindowObservations']){$result.wizardUnknownWindowObservations=DiagnosticInteger $wizard.unknownWindowObservations $true}
+        if($result.wizardButtons -gt 8){throw 'Wizard click counter exceeds its bound.'}
+        $pages=@($wizard.pages)
+        if($pages.Count -gt 8 -or @($pages|Select-Object -Unique).Count -ne $pages.Count){throw 'Wizard page sequence exceeds its bound.'}
+        foreach($page in $pages){if($page -isnot [string] -or $page -cnotin @('welcome','destination','tasks','ready','complete')){throw 'Unknown wizard page identifier.'}}
+        $result.wizardPageIds=if($pages.Count){$pages -join '|'}else{'None'}
+    }catch{$result.wizardStatus='Invalid'}
+}
+function LoadSettings { $a=[object[]]::new(1);$a.SetValue([string]$settings,0);$load.Invoke($null,$a) }
+function AssertPreferences {
+    Require ((Hash $settings) -ceq $settingsHash) 'settings bytes retained'
+    Require ((Hash $startup) -ceq $startupHash) 'Startup shortcut bytes retained'
+    $m=LoadSettings
+    Require ($m.AccentPreset -ceq 'Coral' -and $m.FocusIndicatorStyle -eq 2 -and $m.FocusIndicatorFinish -eq 1 -and $m.FocusIndicatorLighting -eq 3 -and $m.FocusIndicatorGlow) 'appearance and lighting retained'
+    Require ($m.WindowShelfActivationWidth -eq 612 -and $m.WindowShelfActivationHeight -eq 42 -and $m.WindowShelfHoverDelayMs -eq 450 -and -not $m.ScaleWindowSizeToMonitor) 'sensitivity and sizing retained'
+    Require ($m.MonitorAliases['private-e2e-neutral-display'] -ceq 'Demo display' -and $m.HiddenIdentities.Count -eq 0 -and $m.WindowShelfIdentities.Count -eq 0 -and -not $m.MoveWindowsToClickedTaskbar) 'display choices and monitor alias retained'
+    Require ($m.UndoMoveShortcut -eq 393224 -and ($m.MonitorMoveShortcuts -join ',') -ceq '0,0,0,0' -and $m.CloseWindowShortcut -eq 0 -and $m.SearchAppsShortcut -eq 0 -and ($m.FocusWindowShortcuts -join ',') -ceq '0,0,0,0' -and $m.TileWindowShortcut -eq 0) 'saved shortcut choices retained'
+    Require ($m.MinimizeWindowShortcut -eq 393293 -and $m.PinWindowShortcut -eq 0) 'custom minimize and explicit Off pin shortcuts retained'
+    Require ($m.AllowMovingFullscreenApps -and -not $m.PersistentAdministratorSupport -and $m.ExcludedApps.Count -eq 1 -and $m.ExcludedApps[0].Key -ceq 'app:PrivateE2EDemo') 'fullscreen, exclusion and Off approval retained'
+}
+Ordinary $Runtime; Ordinary $Inputs
+$checks=0;$phase='admission';$gui=$null;$fixtureProcess=$null;$supervisor=$null;$totalClock=[Diagnostics.Stopwatch]::StartNew();$consentInputValidated=$false
+$resultPath=Join-Path $Runtime 'private-updater-result.json'
+if(Test-Path -LiteralPath $resultPath){throw 'Fresh output receipt required.'}
+$result=[ordered]@{schema='taskbar-select-private-update-e2e-v1';status='failed';sourceSha=$env:GITHUB_SHA;appSha256='@TARGET_APP_SHA256@';setupSha256='@TARGET_SETUP_SHA256@';sourceBuiltPredecessor=$true;exactReleasedBeta17=$false;exactReleasedBeta17Updater=$false;privateFeed=$true;publicGitHubTested=$false;settingsPreserved=$false;startupPreserved=$false;reopenedExactTarget=$false;actualSetupExitConfirmed=$false;predecessorExitConfirmed=$false;cleanupConfirmed=$false;installedRegistrationVerified=$false;realInstallerLaunched=$false;checkedFeed=$false;downloaded=$false;realStaging=$false;declinedInstallConfirmed=$false;confirmedInstall=$false;intermediateProgressObserved=$false;hostReceiptAvailable=$false;hostReceiptOwnerVerified=$false;hostStatus='Missing';hostPhase='None';hostErrorType='None';hostHresult=0;hostReadRetries=0;hostReadLastHresult=0;interactiveUacTested=$false;rememberedApprovalTested=$false;securityDialogsAutomated=$false;globalInput=$false;checks=0;elapsedMs=0;phase=$phase;errorType='None';hresult=0;failureLine=0;baseErrorType='None';baseHresult=0}
+$result.hostTimerTicks=0;$result.hostStage5Busy=$false;$result.hostStage5Closing=$false;$result.hostStage5ActiveLaunch=$false;$result.hostStage5Launching=$false;$result.hostAfterYesClickReturned=$false;$result.hostStage5UiState='None';$result.hostLaunchExceptionType='None';$result.hostLaunchExceptionHresult=0;$result.hostLaunchNativeError=0;$result.hostLaunchExceptionCount=0
+$result.watchReceiptAvailable=$false;$result.watchReceiptOwnerVerified=$false;$result.watchStatus='Missing';$result.watchSample=0;$result.watchStage=0;$result.watchTimerTicks=0;$result.watchInstallDialogCount=0;$result.watchSecurityDialogCount=0;$result.watchUnknownDialogCount=0;$result.watchUnresponsiveDialogCount=0;$result.watchLaunchExceptionCount=0;$result.watchAfterYesClickReturned=$false;$result.watchStage5Launching=$false;$result.watchStage5ActiveLaunch=$false;$result.watchDialogEnumerationTruncated=$false;$result.watchLaunchExceptionType='None';$result.watchLaunchExceptionHresult=0;$result.watchLaunchNativeError=0
+$result.warningUiaPatternAvailable=$false;$result.warningUiaInvokeAttempted=$false;$result.warningUiaInvokeReturned=$false;$result.warningUiaSessionVerified=$false;$result.warningUiaDesktopVerified=$false;$result.warningUiaOwnerVerified=$false;$result.warningUiaMarkerWritten=$false;$result.warningUiaFinalFencePassed=$false;
+$result.normalUnsignedWarningConsentPresent=$false;$result.normalUnsignedWarningConsentValidated=$false;$result.normalUnsignedWarningEligible=$false;$result.normalUnsignedWarningAccepted=$false
+$result.normalUnsignedWarningRunPosted=$false;$result.normalUnsignedWarningSendAttempted=$false;$result.normalUnsignedWarningSendReturned=$false;$result.normalUnsignedWarningActionMethod='None';$result.warningSendActiveVerified=$false;$result.warningSendForegroundVerified=$false;$result.normalUnsignedWarningRunCount=0;$result.normalUnsignedWarningEligibility='NotObserved';$result.normalUnsignedWarningProofInvalid=$false
+$result.normalUnsignedWarningInputAttempted=$false;$result.warningInputEventsInserted=0;$result.warningInputGateStatus='NotObserved'
+$result.warningInputTelemetry=NewWarningInputTelemetry;$result.warningInputTelemetryInvalid=$false
+foreach($proof in @('warningInputDesktopVerified','warningInputTargetVerified','warningInputSessionVerified','warningInputKeysReleased','warningInputActiveVerified','warningInputForegroundVerified')){$result[$proof]=$false}
+foreach($proof in @('warningExactPathText','warningExactNameText','warningExactDirectoryText','warningRunButtonUnique','warningCancelButtonUnique','warningCheckboxUnique','warningCheckboxStateKnown','warningCheckboxChecked','warningVerifiedInstaller','warningVerifiedDescriptor','warningLaunchContextVerified','warningFileIdentityMatch','warningCompactedSuffixMatch')){$result[$proof]=$false}
+$result.warningPathBinding='None'
+$result.warningFileIdentityStatus='NotObserved';$result.warningNameCarrierMaskedShape=''
+foreach($shape in @('warningTextContainsFullPath','warningTextContainsName','warningTextContainsDirectory','warningTextSysLink','warningTextAnchorParsed','warningTextBidiWrapped','warningNameCarrierAttributeId','warningNameCarrierAttributeHref','warningNameCarrierAttributeCaseVariant','warningNameCarrierAttributeOther','warningNameCarrierLiteralName','warningNameCarrierLiteralPath','warningNameCarrierLiteralDirectory','warningNameCarrierLiteralBidi','warningTextOfficialUrl','warningTextOfficialOrigin','warningActivationObserved','warningDialogActive','warningDialogForeground','warningForegroundOwnedByFixture','warningRootEnabled','warningRunParentIsWarning','warningRunAncestorChainKnown','warningRunAncestorChainEnabled')){$result[$shape]=$false}
+$result.warningRunParentDepth=0;$result.warningRunParentClass='None'
+$result.warningNameCarrierClass='None';$result.warningNameCarrierShape='None';$result.warningNameCarrierParse='None'
+$result.wizardStatus='Missing';$result.wizardPhase='None';$result.wizardErrorType='None';$result.wizardHresult=0;$result.wizardButtons=0;$result.wizardPageIds='None';$result.wizardUnknownWindowObservations=0
+$result.wizardCheckpoint=0;$result.wizardObservedPage='None';$result.wizardReadyPathControlCount=0;$result.wizardReadyDestinationVerified=$false;$result.wizardReadyDestinationFromControl=$false;$result.wizardReadyDestinationFromRegistration=$false
+$target=Join-Path $Inputs 'TaskbarSelect.exe';$baseline=Join-Path $Inputs 'TaskbarSelect-1.0.0-beta.17-Setup.exe'
+$targetSetup=Join-Path $Inputs 'TaskbarSelect-1.0.0-beta.18-Setup.exe';$sums=Join-Path $Inputs 'SHA256SUMS.txt'
+$fixture=Join-Path $Inputs 'PrivateUpdateFixture.exe';$supervisorExe=Join-Path $Inputs 'SetupWizardSupervisor.exe'
+$install=Join-Path $Runtime 'owned-install';$installed=Join-Path $install 'TaskbarSelect.exe';$uninstaller=Join-Path $install 'unins000.exe'
+$profile=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'TaskbarSelect';$settings=Join-Path $profile 'settings.json'
+$startupDir=[Environment]::GetFolderPath([Environment+SpecialFolder]::Startup,[Environment+SpecialFolderOption]::DoNotVerify);$startup=Join-Path $startupDir 'Taskbar Select.lnk'
+$registrationPath='Software\Microsoft\Windows\CurrentVersion\Uninstall\{A446A470-529B-42E0-AD2D-D24B31864DFC}_is1'
+try {
+    foreach($inputFile in @($target,$baseline,$targetSetup,$sums,$fixture,$supervisorExe)){Ordinary $inputFile;Require ((Get-Item -LiteralPath $inputFile).Length -gt 0) 'fixed input exists'}
+    Require ((Hash $target) -ceq $result.appSha256 -and (Hash $targetSetup) -ceq $result.setupSha256) 'exact validated target payload'
+    Require ((Hash $baseline) -ceq 'e1d35af6c0d9ca9bc16f537b82d12058bbf8cb9ae1180a83f8b1b4a640350a3d') 'pinned released predecessor Setup'
+    Require ((Hash $sums) -ceq '@TARGET_SUMS_SHA256@') 'pinned target checksum asset'
+    $consentPath=Join-Path $Inputs 'private-unsigned-warning-consent.json'
+    if(Test-Path -LiteralPath $consentPath){
+        $result.normalUnsignedWarningConsentPresent=$true
+        Ordinary $consentPath
+        Require ((Test-Path -LiteralPath $consentPath -PathType Leaf) -and (Get-Item -LiteralPath $consentPath).Length -le 4096) 'bounded ordinary optional consent data'
+        $consent=Get-Content -LiteralPath $consentPath -Raw|ConvertFrom-Json
+        $keys=@($consent.PSObject.Properties.Name|Sort-Object)
+        Require (($keys -join ',') -ceq 'NormalOpenFileWarningOnly,oneTime,runId,schema,setupSha256,sourceSha') 'exact optional consent data fields'
+        Require ($consent.schema -is [string] -and $consent.schema -ceq 'taskbar-select-private-unsigned-warning-consent-v1' -and
+            $consent.sourceSha -is [string] -and $consent.sourceSha -ceq $env:GITHUB_SHA -and $consent.setupSha256 -is [string] -and $consent.setupSha256 -ceq $result.setupSha256 -and
+            $consent.runId -is [string] -and $consent.runId -ceq $env:GITHUB_RUN_ID -and $consent.runId -cmatch '^[0-9]{1,20}$' -and
+            $consent.NormalOpenFileWarningOnly -is [bool] -and $consent.NormalOpenFileWarningOnly -eq $true -and $consent.oneTime -is [bool] -and $consent.oneTime -eq $true) 'optional consent exact current-run scope'
+        $result.normalUnsignedWarningConsentValidated=$true
+        $consentInputValidated=$true
+    }
+    Require ([Diagnostics.FileVersionInfo]::GetVersionInfo($fixture).ProductVersion -ceq '1.0.0-beta.17') 'labelled source-built predecessor metadata'
+    # This diagnostic host is compiled in the admitted job. Its fresh build
+    # provenance and exact copy hashes are checked by the outer source-bound
+    # staging fixture; a local compiler's nondeterministic hash is not a pin.
+    $fixtureHash=Hash $fixture
+    # Use the exact production identity reader; do not lower integrity or change UAC.
+    $assembly=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes($target));$static=[Reflection.BindingFlags]'Static,NonPublic';$fields=[Reflection.BindingFlags]'Instance,NonPublic'
+    $identity=$assembly.GetType('TaskbarSelect.NativeProcessIdentity',$true).GetMethod('Read',$static,$null,[Type[]]@([uint32]),$null).Invoke($null,[object[]]@([uint32]$PID))
+    Require ([bool]$identity.GetType().GetField('IntegrityAvailable',$fields).GetValue($identity) -and [uint32]$identity.GetType().GetField('IntegrityLevel',$fields).GetValue($identity) -eq 8192 -and [bool]$identity.GetType().GetField('ElevationAvailable',$fields).GetValue($identity) -and -not [bool]$identity.GetType().GetField('Elevated',$fields).GetValue($identity)) 'genuine ordinary MED launcher'
+    NoneRunning
+    foreach($path in @($profile,$install,$startup,(Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\Taskbar Select'),(Join-Path ([Environment]::GetFolderPath('Programs')) 'Taskbar Select.lnk'),(Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Taskbar Select.lnk'))){Require (-not (Test-Path -LiteralPath $path)) 'no pre-existing app state'}
+    $key=Registration;try{Require ($null -eq $key) 'no existing per-user registration'}finally{if($key){$key.Dispose()}}
+    $phase='baseline-install';RunBounded $baseline @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/CURRENTUSER',('/DIR="'+$install+'"')) 30000 'released baseline Setup'
+    Require ([Diagnostics.FileVersionInfo]::GetVersionInfo($installed).ProductVersion -ceq '1.0.0-beta.17' -and (Hash $installed) -ceq '4f64735c472a775d4c18a2fe6454dee73a3c0becd44f2b7332968ed9649d1628') 'real released beta17 bootstrap installed'
+    $key=Registration;try{Require ($null -ne $key -and (Same $key.GetValue('InstallLocation') $install) -and $key.GetValue('DisplayVersion') -ceq '1.0.0-beta.17') 'baseline registered in owned directory'}finally{if($key){$key.Dispose()}}
+    NoneRunning
+    $phase='seed-private-settings';$settingsType=$assembly.GetType('TaskbarSelect.Settings',$true);$program=$assembly.GetType('TaskbarSelect.Program',$true)
+    $load=$program.GetMethod('Load',$static,$null,[Type[]]@([string]),$null);$save=$program.GetMethod('Save',$static,$null,[Type[]]@($settingsType,[string]),$null)
+    $model=LoadSettings
+    Require ($model.AccentPreset -ceq 'Forest Green' -and $model.WindowShelfActivationHeight -eq 6 -and $model.FocusIndicatorStyle -eq 2 -and $model.FocusIndicatorFinish -eq 0 -and $model.FocusIndicatorLighting -eq 0 -and -not $model.FocusIndicatorGlow -and $model.MinimizeWindowShortcut -eq 196685 -and $model.PinWindowShortcut -eq 196688) 'exact target fresh defaults before custom upgrade seed'
+    $model.WindowShelfActivationWidth=612;$model.WindowShelfActivationHeight=42;$model.WindowShelfHoverDelayMs=450;$model.ScaleWindowSizeToMonitor=$false
+    $model.UndoMoveShortcut=393224;$model.MonitorMoveShortcuts=[int[]]@(0,0,0,0);$model.AllowMovingFullscreenApps=$true
+    $model.FocusIndicatorStyle=2;$model.FocusIndicatorFinish=1;$model.FocusIndicatorGlow=$true;$model.FocusIndicatorLighting=3;$model.AccentPreset='Coral'
+    $model.CloseWindowShortcut=0;$model.SearchAppsShortcut=0;$model.FocusWindowShortcuts=[int[]]@(0,0,0,0);$model.TileWindowShortcut=0;$model.PersistentAdministratorSupport=$false
+    $model.MinimizeWindowShortcut=393293;$model.PinWindowShortcut=0
+    $model.MonitorAliases.Add('private-e2e-neutral-display','Demo display');$rule=[Activator]::CreateInstance($assembly.GetType('TaskbarSelect.AppRule',$true));$rule.Key='app:PrivateE2EDemo';$rule.Name='Demo app';$model.ExcludedApps.Add($rule)
+    $argsSave=[object[]]::new(2);$argsSave.SetValue($model.PSObject.BaseObject,0);$argsSave.SetValue([string]$settings,1);$null=$save.Invoke($null,$argsSave);$settingsHash=Hash $settings
+    [void][IO.Directory]::CreateDirectory($startupDir);$shell=New-Object -ComObject WScript.Shell;$link=$null
+    try{$link=$shell.CreateShortcut($startup);$link.TargetPath=$installed;$link.Arguments='--startup';$link.WorkingDirectory=$install;$link.Save()}finally{if($link){$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)};$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+    $startupHash=Hash $startup;AssertPreferences
+    # The predecessor adapter differs only in entry/version metadata and fixed
+    # private transport. All changed source/hashes are recorded by its builder.
+    $phase='install-fixture';Copy-Item -LiteralPath $fixture -Destination $installed -Force;Require ((Hash $installed) -ceq $fixtureHash -and (Hash $fixture) -ceq $fixtureHash) 'owned predecessor fixture copied without changes'
+    $fixtureReceipt=Join-Path $Runtime 'private-fixture-receipt.json'
+    $phase='updater';$fixtureProcess=Start-Process -FilePath $installed -ArgumentList @('--private-update-fixture',('"'+$Inputs+'"'),('"'+$fixtureReceipt+'"')) -WindowStyle Normal -PassThru;$null=$fixtureProcess.Handle
+    $fixtureStarted=$fixtureProcess.StartTime.ToUniversalTime().Ticks;$clock=[Diagnostics.Stopwatch]::StartNew();$launched=$null
+    while($clock.ElapsedMilliseconds -lt 30000){
+        $null=Budget 1
+        try{$r=ReadHostReceipt}catch{
+            if(IsTransientHostRead $_.Exception){$result.hostReadRetries++;$result.hostReadLastHresult=$_.Exception.GetBaseException().HResult;Start-Sleep -Milliseconds 20;continue}
+            throw
+        }
+        if($null -ne $r){$lastHostReceipt=$r}
+        if($null -ne $r){if($r.status -ceq 'launched'){$launched=$r;break};if($r.status -ceq 'failed'){throw 'Owned updater fixture reported failure.'}}
+        $fixtureProcess.Refresh();if($fixtureProcess.HasExited){throw 'Owned updater fixture exited before launch receipt.'};Start-Sleep -Milliseconds 100
+    }
+    Require ($null -ne $launched -and $launched.fixturePid -eq $fixtureProcess.Id -and $launched.fixtureStartedUtcTicks -eq $fixtureStarted) 'actual updater launch receipt owner'
+    Require ($launched.checkedFeed -and $launched.downloaded -and $launched.realStaging -and $launched.intermediateProgressObserved -and $launched.declinedInstallConfirmed -and $launched.confirmedInstall -and $launched.setupArguments -ceq '' -and $launched.setupSha256 -ceq $result.setupSha256 -and $launched.settingsSha256 -ceq $settingsHash) 'real updater form download No-then-Yes and exact Shell handoff'
+    foreach($proof in @('checkedFeed','downloaded','realStaging','declinedInstallConfirmed','confirmedInstall','intermediateProgressObserved')){$result[$proof]=$true}
+    $result.realInstallerLaunched=$true
+    $phase='ordinary-setup-wizard';$wizardReceipt=Join-Path $Runtime 'wizard-receipt.json'
+    $supervisor=Start-Process -FilePath $supervisorExe -ArgumentList @(('"'+$fixtureReceipt+'"'),('"'+$install+'"'),('"'+$Runtime+'"'),('"'+$wizardReceipt+'"')) -WindowStyle Hidden -PassThru
+    $null=$supervisor.Handle;Require ($supervisor.WaitForExit((Budget 65000))) 'ordinary Setup wizard bounded completion';$supervisor.Refresh();Require ($supervisor.ExitCode -eq 0) 'ordinary Setup wizard succeeded'
+    $wizard=ReadWizardReceipt;Copy-WizardCheckpoint $wizard $result
+    Require ($wizard.status -ceq 'passed' -and $wizard.setupArguments -ceq '' -and -not $wizard.globalInput -and -not $wizard.securityDialogsAutomated -and $result.wizardReadyDestinationVerified) 'wizard evidence exact non-silent launch and owned destination'
+    Require ($fixtureProcess.WaitForExit(2000)) 'Setup stopped owned predecessor normally'
+    $result.actualSetupExitConfirmed=$true;$result.predecessorExitConfirmed=$true
+    Require ((Hash $installed) -ceq $result.appSha256 -and [Diagnostics.FileVersionInfo]::GetVersionInfo($installed).ProductVersion -ceq '1.0.0-beta.18') 'Setup installed exact target'
+    $key=Registration;try{Require ($null -ne $key -and (Same $key.GetValue('InstallLocation') $install) -and $key.GetValue('DisplayVersion') -ceq '1.0.0-beta.18') 'upgraded registration exact'}finally{if($key){$key.Dispose()}}
+    $result.installedRegistrationVerified=$true
+    AssertPreferences
+    # Finish normally launches the app. Stop that exact owned instance, then
+    # perform two ordinary reopens with no diagnostic or profile arguments.
+    $phase='postinstall-target';$settle=[Diagnostics.Stopwatch]::StartNew();$post=@()
+    while($settle.ElapsedMilliseconds -lt 12000){$post=@(Get-Process -Name TaskbarSelect -ErrorAction SilentlyContinue);if($post.Count -eq 1){break};foreach($p in $post){$p.Dispose()};Start-Sleep -Milliseconds 100}
+    Require ($post.Count -eq 1) 'normal Finish launched one target GUI';$gui=$post[0];$null=$gui.Handle;Require ((Same $gui.MainModule.FileName $installed) -and (Hash $installed) -ceq $result.appSha256) 'postinstall GUI image exact'
+    StopExactGui $gui $installed;$gui=$null;AssertPreferences
+    foreach($iteration in 1,2){$phase='reopen-'+$iteration;$gui=StartExactGui $installed;AssertPreferences;StopExactGui $gui $installed;$gui=$null;AssertPreferences}
+    $result.settingsPreserved=$true;$result.startupPreserved=$true;$result.reopenedExactTarget=$true
+    $phase='owned-uninstall';$uninstallerHash=Hash $uninstaller;NoneRunning;Require ((Hash $installed) -ceq $result.appSha256 -and (Hash $uninstaller) -ceq $uninstallerHash) 'only owned verified installation enters cleanup'
+    RunBounded $uninstaller @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') 20000 'owned target uninstall'
+    $cleanup=[Diagnostics.Stopwatch]::StartNew();while($cleanup.ElapsedMilliseconds -lt 3000 -and (Test-Path -LiteralPath $uninstaller)){Start-Sleep -Milliseconds 100}
+    foreach($path in @($installed,$uninstaller,(Join-Path $install 'unins000.dat'),$settings,$startup)){Require (-not (Test-Path -LiteralPath $path)) 'owned uninstall removed its state'}
+    $key=Registration;try{Require ($null -eq $key) 'owned uninstall removed registration'}finally{if($key){$key.Dispose()}}
+    NoneRunning;$result.cleanupConfirmed=$true;$result.status='passed';$phase='passed'
+} catch {$result.errorType=$_.Exception.GetType().Name;$result.hresult=$_.Exception.HResult;$result.failureLine=$_.InvocationInfo.ScriptLineNumber;$base=$_.Exception.GetBaseException();$result.baseErrorType=$base.GetType().Name;$result.baseHresult=$base.HResult;throw}
+finally {
+    # Never force-kill, remove failed recovery/profile state, or claim cleanup
+    # after an uncertain Setup. The enclosing disposable job owns the lifetime.
+    CaptureHostDiagnostic
+    CaptureWatchdogDiagnostic
+    CaptureWizardDiagnostic
+    if($result.status -ceq 'passed' -and $result.warningUiaInvokeAttempted){
+        if(-not $result.normalUnsignedWarningAccepted -or -not $consentInputValidated -or -not $result.normalUnsignedWarningEligible -or
+            $result.normalUnsignedWarningRunCount -ne 1 -or -not $result.warningUiaMarkerWritten -or -not $result.securityDialogsAutomated){$result.normalUnsignedWarningProofInvalid=$true}
+    }
+    if($result.normalUnsignedWarningProofInvalid){$result.status='failed';$phase='warning-proof-invalid'}
+    if($gui){$gui.Dispose()};if($fixtureProcess){$fixtureProcess.Dispose()};if($supervisor){$supervisor.Dispose()}
+    $result.phase=$phase;$result.checks=$checks;$result.elapsedMs=$totalClock.ElapsedMilliseconds;$result|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $resultPath -Encoding UTF8
+}

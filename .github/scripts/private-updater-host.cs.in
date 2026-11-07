@@ -1,0 +1,1397 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
+using System.Text;
+using System.Threading;
+using System.Web.Script.Serialization;
+using System.Windows.Forms;
+using System.Windows.Automation;
+using System.Xml;
+using Microsoft.Win32.SafeHandles;
+
+// CI-only entry-version adapter and private transport. Production updater,
+// permission, eligibility, confirmation and launch implementation is unchanged.
+namespace TaskbarSelect
+{
+    internal static class PrivateUpdateFixture
+    {
+        internal const string Target = "1.0.0-beta.18";
+        internal const string SetupHash = "@TARGET_SETUP_SHA256@";
+        internal const string SumsHash = "@TARGET_SUMS_SHA256@";
+        const BindingFlags Instance = BindingFlags.Instance | BindingFlags.NonPublic;
+        const BindingFlags Static = BindingFlags.Static | BindingFlags.NonPublic;
+        static readonly Stopwatch clock = Stopwatch.StartNew();
+        static readonly JavaScriptSerializer json = new JavaScriptSerializer();
+        static readonly Receipt receipt = new Receipt();
+        static string receiptPath, settingsHash;
+        static AppUpdateForm updateForm;
+        static Button primary;
+        static System.Windows.Forms.Timer timer;
+        static PinnedTransport transport;
+        static int stage;
+        static bool handling, dialogHandled;
+        static int timerTicks, firstChanceHandling;
+        static long stage5Published;
+        static readonly object exceptionGate = new object();
+        static string launchExceptionType = "None";
+        static int launchExceptionHresult, launchNativeError, launchExceptionCount;
+        static volatile bool afterYesClickReturned;
+        static uint uiThread;
+        static string watchdogPath;
+        static Thread watchdog;
+        static readonly ManualResetEvent watchdogStop = new ManualResetEvent(false);
+        static readonly object warningGate = new object();
+        static WarningObservation warningObservation = new WarningObservation();
+        static bool warningConsentPresent, warningConsentValidated;
+        static int warningRunAttempt;
+        static volatile bool warningRunPosted = false;
+        static volatile bool warningSendAttempted = false, warningSendReturned = false, warningSendActiveVerified = false, warningSendForegroundVerified = false;
+        static volatile bool warningInputAttempted = false, warningInputDesktopVerified = false, warningInputTargetVerified = false, warningInputSessionVerified = false, warningInputKeysReleased = false;
+        static volatile bool warningInputActiveVerified = false, warningInputForegroundVerified = false;
+        static int warningInputEventsInserted;
+        static WarningInputTelemetry warningInputTelemetry = new WarningInputTelemetry();
+        static int warningInputTelemetryRevision;
+        static volatile string warningInputGateStatus = "NotObserved";
+        static volatile string warningActionMethod = "None";
+        static int setupIdentityAuthenticated;
+        static volatile bool warningUiaPatternAvailable, warningUiaInvokeAttempted, warningUiaInvokeReturned;
+        static volatile bool warningUiaSessionVerified, warningUiaDesktopVerified, warningUiaOwnerVerified;
+        static volatile bool warningUiaMarkerWritten, warningUiaFinalFencePassed;
+        static volatile VerifiedAppUpdate retainedVerified;
+        static volatile bool retainedDescriptorReturnedAfterNo;
+
+        sealed class Receipt : WarningObservation
+        {
+            public string schema = "taskbar-select-private-update-fixture-v1";
+            public string status = "running", phase = "entry", currentVersion = "1.0.0-beta.17", targetVersion = Target;
+            public string setupPath, setupSha256, settingsSha256, errorType;
+            public string setupArguments = "";
+            public uint fixturePid, setupPid;
+            public long fixtureStartedUtcTicks, setupStartedUtcTicks;
+            public int hresult, progressEvents;
+            public bool checkedFeed, downloaded, realStaging, intermediateProgressObserved, declinedInstallConfirmed, confirmedInstall;
+            public int timerTicks, launchExceptionHresult, launchNativeError, launchExceptionCount;
+            public bool stage5Busy, stage5Closing, stage5Launching, stage5ActiveLaunch, afterYesClickReturned;
+            public string stage5UiState = "None", launchExceptionType = "None";
+            public bool sourceBuiltPredecessor = true, exactReleasedBeta17 = false, publicGitHubTested = false;
+        }
+
+        [STAThread]
+        static int Main(string[] args)
+        {
+            // Refuse accidental execution on a real desktop, even in lifecycle
+            // dispatch. Hosted sponsor/account authentication is external.
+            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
+                Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted" ||
+                Environment.GetEnvironmentVariable("RUNNER_OS") != "Windows" ||
+                Environment.GetEnvironmentVariable("GITHUB_EVENT_NAME") != "workflow_dispatch" ||
+                Environment.GetEnvironmentVariable("GITHUB_REPOSITORY") != "mrlevivel/TaskbarSelect" ||
+                Environment.GetEnvironmentVariable("GITHUB_REF") != "refs/heads/codex/beta18-private-updater" ||
+                !System.Text.RegularExpressions.Regex.IsMatch(Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "", "\\A[a-f0-9]{40}\\z")) return 2;
+            bool driver = args.Length > 0 && args[0] == "--private-update-fixture";
+            try {
+                if (!driver) return NormalMain(args);
+                Require(args.Length == 3 && Application.ProductVersion == receipt.currentVersion);
+                var identity = NativeProcessIdentity.Current;
+                Require(identity.IntegrityAvailable && identity.ElevationAvailable && !identity.Elevated && identity.IntegrityLevel == NativeProcessIdentity.Medium);
+                string root = Path.GetFullPath(Environment.GetEnvironmentVariable("RUNNER_TEMP"));
+                Require(System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(root.TrimEnd('\\')), "\\ATaskbarSelectCiRuntime\\.[a-f0-9]{32}\\z"));
+                OrdinaryPath(root);
+                string assets = BoundedPath(root, args[1]);
+                receiptPath = BoundedPath(root, args[2]);
+                Require(Same(assets, Path.Combine(root, "private-updater-input")) && Same(receiptPath, Path.Combine(root, "private-fixture-receipt.json")));
+                Require(Directory.Exists(assets) && Directory.Exists(Path.GetDirectoryName(receiptPath)) && !File.Exists(receiptPath));
+                foreach (string path in new[] { assets, Path.GetDirectoryName(receiptPath), Application.ExecutablePath }) OrdinaryPath(path);
+                Require(AppUpdateInstaller.EligibilityError(true) == null);
+                settingsHash = Hash(Program.ConfigPath);
+                receipt.settingsSha256 = settingsHash;
+                using (Process own = Process.GetCurrentProcess()) {
+                    receipt.fixturePid = (uint)own.Id; receipt.fixtureStartedUtcTicks = own.StartTime.ToUniversalTime().Ticks;
+                }
+                transport = new PinnedTransport(assets);
+                ReadWarningConsent(assets);
+                uiThread = GetCurrentThreadId();
+                watchdogPath = Path.Combine(root, "private-fixture-watchdog.json");
+                Require(!File.Exists(watchdogPath) && !File.Exists(watchdogPath + ".next"));
+                AppDomain.CurrentDomain.FirstChanceException += FirstChance;
+                watchdog = new Thread(Watchdog) { IsBackground = true, Name = "Private updater observer" };
+                watchdog.Start();
+                Write("starting-production-app");
+                Application.Idle += Idle;
+                return NormalMain(new string[0]);
+            } catch (Exception error) {
+                Fail(error); return 2;
+            } finally {
+                watchdogStop.Set();
+                if (watchdog != null) watchdog.Join(1500);
+                AppDomain.CurrentDomain.FirstChanceException -= FirstChance;
+                if (timer != null) timer.Dispose();
+                if (transport != null) transport.Dispose();
+            }
+        }
+
+        static int NormalMain(string[] args)
+        {
+            MethodInfo main = typeof(Program).GetMethod("Main", Static, null, new[] { typeof(string[]) }, null);
+            Require(main != null);
+            try { return (int)main.Invoke(null, new object[] { args }); }
+            catch (TargetInvocationException error) { throw error.InnerException ?? error; }
+        }
+        internal static AppUpdateService CreateUpdateService()
+        {
+            Require(transport != null);
+            return new AppUpdateService(transport, new AppUpdateStaging());
+        }
+        static IEnumerable<Control> Descendants(Control root)
+        {
+            foreach (Control child in root.Controls) {
+                yield return child;
+                foreach (Control descendant in Descendants(child)) yield return descendant;
+            }
+        }
+        static void Idle(object sender, EventArgs e)
+        {
+            if (timer != null) return;
+            try {
+                SettingsForm settings = Application.OpenForms.OfType<SettingsForm>().SingleOrDefault();
+                if (settings == null) { Require(clock.ElapsedMilliseconds < 30000); return; }
+                var controller = (Controller)typeof(SettingsForm).GetField("controller", Instance).GetValue(settings);
+                Require(controller != null && controller.DesktopRuntime && AppUpdateInstaller.InstallError(controller) == null);
+                Require(Hash(Program.ConfigPath) == settingsHash);
+                Application.Idle -= Idle;
+                var tabs = Descendants(settings).OfType<TabControl>().Single(tab => tab.AccessibleName == "Sections");
+                var settingsPage = tabs.TabPages.Cast<TabPage>().Single(page => page.Text == "Settings");
+                tabs.SelectedTab = settingsPage;
+                var check = Descendants(settingsPage).OfType<Button>().Single(button => button.AccessibleName == "Check for updates");
+                Require(check.Visible && check.Enabled);
+                Write("checking-private-feed");
+                check.PerformClick();
+                updateForm = (AppUpdateForm)typeof(SettingsForm).GetField("updateForm", Instance).GetValue(settings);
+                Require(updateForm != null && updateForm.Visible && Object.ReferenceEquals(updateForm.Owner, settings));
+                primary = Field<Button>("primary");
+                updateForm.FormClosed += Closed;
+                timer = new System.Windows.Forms.Timer { Interval = 50 };
+                timer.Tick += Tick; timer.Start();
+            } catch (Exception error) { Fail(error); Application.Exit(); }
+        }
+        static T Field<T>(string name)
+        { return (T)typeof(AppUpdateForm).GetField(name, Instance).GetValue(updateForm); }
+        static void Tick(object sender, EventArgs e)
+        {
+            if (receipt.status == "launched" || receipt.status == "failed") return;
+            if (handling) return;
+            Interlocked.Increment(ref timerTicks);
+            handling = true;
+            try {
+                Require(clock.ElapsedMilliseconds < 180000 && Hash(Program.ConfigPath) == settingsHash);
+                if (stage == 2 || stage == 4) { HandleConfirmation(stage == 4); return; }
+                Require(updateForm != null && !updateForm.IsDisposed);
+                bool busy = Field<bool>("busy");
+                if (stage == 5) ObserveStage5(busy);
+                if (busy) {
+                    if (stage == 1) {
+                        int progress = Field<ProgressBar>("progress").Value;
+                        if (progress > 0 && progress < 100) receipt.intermediateProgressObserved = true;
+                    }
+                    return;
+                }
+                if (stage == 0) {
+                    var release = Field<AppUpdateRelease>("release");
+                    Require(release != null && release.Version == Target && primary.Enabled && Field<Label>("state").Text == "Version " + Target + " is available.");
+                    receipt.checkedFeed = true; stage = 1; Write("downloading"); primary.PerformClick();
+                } else if (stage == 1) {
+                    var verified = Field<VerifiedAppUpdate>("verified");
+                    Require(verified != null && verified.Version == Target && verified.Sha256 == SetupHash);
+                    verified.VerifyForLaunch();
+                    retainedVerified = verified;
+                    // VerifyForLaunch also rechecks the staging implementation's
+                    // live, pinned Internet Zone lease. Framework File.Exists
+                    // on an ADS string is not a reliable additional proof.
+                    Require(Hash(verified.InstallerPath) == SetupHash);
+                    receipt.downloaded = true; receipt.realStaging = true; receipt.progressEvents = transport.ReadEvents;
+                    receipt.setupPath = verified.InstallerPath; receipt.setupSha256 = SetupHash;
+                    Require(receipt.progressEvents > 1 && receipt.intermediateProgressObserved && primary.Enabled && Field<ProgressBar>("progress").Value == 100);
+                    stage = 2; dialogHandled = false; Write("declining-first-install");
+                    // Timer reentrancy is required while MessageBox owns its
+                    // nested modal loop. Only our own exact consent is clicked.
+                    handling = false; primary.PerformClick();
+                } else if (stage == 3) {
+                    Require(dialogHandled && Object.ReferenceEquals(retainedVerified, Field<VerifiedAppUpdate>("verified")) && Field<Label>("state").Text == "The update is ready when you are.");
+                    Require(ActiveLaunch() == null);
+                    retainedDescriptorReturnedAfterNo = true;
+                    receipt.declinedInstallConfirmed = true;
+                    stage = 4; dialogHandled = false; Write("confirming-install");
+                    handling = false; primary.PerformClick();
+                } else if (stage == 5) {
+                    // Launch is asynchronous after confirmation. Closed writes
+                    // the native Process identity before Setup closes this app.
+                    Require(dialogHandled);
+                } else throw new InvalidOperationException("Unexpected fixture phase.");
+            } catch (Exception error) { Fail(error); Application.Exit(); }
+            finally { handling = false; }
+        }
+        static object ActiveLaunch()
+        { return typeof(AppUpdateInstaller).GetField("activeLaunch", Static).GetValue(null); }
+        static bool Launching()
+        { return (bool)typeof(AppUpdateInstaller).GetField("launching", Static).GetValue(null); }
+        static void ObserveStage5(bool busy)
+        {
+            receipt.timerTicks = Interlocked.CompareExchange(ref timerTicks, 0, 0);
+            receipt.stage5Busy = busy; receipt.stage5Closing = Field<bool>("closing");
+            receipt.stage5Launching = Launching(); receipt.stage5ActiveLaunch = ActiveLaunch() != null;
+            receipt.afterYesClickReturned = afterYesClickReturned;
+            string text = Field<Label>("state").Text;
+            receipt.stage5UiState = text == "Could not start the update." ? "GenericLaunchFailure" :
+                text == "Checking the installer before opening Setup..." ? "VerificationOrShellWait" :
+                text == "Setup is opening. Follow its instructions to finish updating." ? "SetupOpening" :
+                text == AppUpdateInstaller.ApprovalError ? "ApprovalRejected" : "Other";
+            CopyException(receipt);
+            long now = Stopwatch.GetTimestamp();
+            if (stage5Published == 0 || now - stage5Published >= Stopwatch.Frequency) {
+                stage5Published = now; Write("post-confirmation-wait");
+            }
+            if (!busy && !receipt.stage5Closing && !receipt.stage5ActiveLaunch) {
+                receipt.phase = "launch-settled-without-process";
+                throw new InvalidOperationException("The unchanged updater settled without an authenticated installer process.");
+            }
+        }
+        static void CopyException(Receipt value)
+        {
+            lock (exceptionGate) {
+                value.launchExceptionType = launchExceptionType; value.launchExceptionHresult = launchExceptionHresult;
+                value.launchNativeError = launchNativeError; value.launchExceptionCount = launchExceptionCount;
+            }
+        }
+        static void FirstChance(object sender, FirstChanceExceptionEventArgs args)
+        {
+            if (Interlocked.CompareExchange(ref stage, 0, 0) != 5 || Interlocked.CompareExchange(ref firstChanceHandling, 1, 0) != 0) return;
+            try {
+                // Observe only exceptions inside this exact unchanged install
+                // implementation. No message, stack, file or arbitrary data is
+                // persisted; stack inspection requests no source filenames.
+                var frames = new StackTrace(false).GetFrames();
+                bool matched = frames != null && frames.Any(frame => {
+                    MethodBase method = frame.GetMethod(); Type owner = method == null ? null : method.DeclaringType;
+                    return owner != null && owner.FullName != null && owner.FullName.StartsWith("TaskbarSelect.AppUpdateInstaller", StringComparison.Ordinal);
+                });
+                if (!matched) return;
+                Exception error = args.Exception;
+                var native = error as System.ComponentModel.Win32Exception;
+                lock (exceptionGate) {
+                    launchExceptionType = error.GetType().Name; launchExceptionHresult = error.HResult;
+                    launchNativeError = native == null ? 0 : native.NativeErrorCode; launchExceptionCount++;
+                }
+            } catch (Exception) { }
+            finally { Interlocked.Exchange(ref firstChanceHandling, 0); }
+        }
+        static void Closed(object sender, FormClosedEventArgs e)
+        {
+            if (receipt.status == "failed") return;
+            try {
+                Require(stage == 5 && dialogHandled && receipt.confirmedInstall);
+                object session = ActiveLaunch(); Require(session != null);
+                Require(Object.ReferenceEquals(retainedVerified, session.GetType().GetField("update", Instance).GetValue(session)));
+                Process setup = (Process)session.GetType().GetField("process", Instance).GetValue(session);
+                Require(setup != null && !setup.HasExited && Same(setup.MainModule.FileName, receipt.setupPath));
+                Require(Hash(receipt.setupPath) == SetupHash && AppUpdateInstaller.StartInfo(receipt.setupPath).Arguments == "");
+                receipt.setupPid = (uint)setup.Id; receipt.setupStartedUtcTicks = setup.StartTime.ToUniversalTime().Ticks;
+                Interlocked.Exchange(ref setupIdentityAuthenticated, 1);
+                receipt.status = "launched"; Write("setup-launch"); timer.Stop();
+            } catch (Exception error) { Fail(error); Application.Exit(); }
+        }
+
+        delegate bool WindowVisitor(IntPtr window, IntPtr parameter);
+        [DllImport("user32.dll")] static extern bool EnumThreadWindows(uint thread, WindowVisitor visitor, IntPtr parameter);
+        [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+        [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
+        [DllImport("user32.dll")] static extern IntPtr GetDlgItem(IntPtr window, int id);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int size);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int size);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr window);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wparam, StringBuilder lparam, uint flags, uint timeout, out UIntPtr result);
+        [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr window, WindowVisitor visitor, IntPtr parameter);
+        [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowStyle(IntPtr window, int index);
+        [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern SafeFileHandle OpenWarningMetadataPath(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandle", SetLastError = true)]
+        static extern bool WarningFileInformation(SafeFileHandle handle, out AdministratorLaunch.FileInformation information);
+        [StructLayout(LayoutKind.Sequential)]
+        struct WarningRectangle { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)]
+        struct WarningGuiThreadInformation
+        {
+            public uint Size, Flags;
+            public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+            public WarningRectangle CaretRectangle;
+        }
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool GetGUIThreadInfo(uint thread, ref WarningGuiThreadInformation information);
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll", SetLastError = true)] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+        [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
+        [DllImport("user32.dll")] static extern IntPtr GetThreadDesktop(uint thread);
+        [DllImport("user32.dll")] static extern IntPtr GetProcessWindowStation();
+        [DllImport("user32.dll", EntryPoint = "GetUserObjectInformationW", SetLastError = true)]
+        static extern bool WarningUserObjectInformation(IntPtr handle, int index, IntPtr value, uint length, out uint needed);
+        [DllImport("wtsapi32.dll", EntryPoint = "WTSQuerySessionInformationW", SetLastError = true)]
+        static extern bool WarningSessionInformation(IntPtr server, uint session, int information, out IntPtr buffer, out uint bytes);
+        [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr buffer);
+        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+        [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out WarningRectangle rectangle);
+        [DllImport("user32.dll")] static extern bool GetClipCursor(out WarningRectangle rectangle);
+        [DllImport("user32.dll")] static extern bool GetCursorPos(out WarningInputPoint point);
+        [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+        [DllImport("user32.dll")] static extern IntPtr GetThreadDpiAwarenessContext();
+        [DllImport("user32.dll")] static extern bool AreDpiAwarenessContextsEqual(IntPtr a, IntPtr b);
+        [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(WarningInputPoint point);
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct WarningInputPoint { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct WarningMouseInput { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
+        [StructLayout(LayoutKind.Explicit, Size = 32)]
+        internal struct WarningInputUnion { [FieldOffset(0)] public WarningMouseInput Mouse; }
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct WarningNativeInput { public uint Type; public WarningInputUnion Value; }
+        static string Text(IntPtr window, bool className)
+        { var value = new StringBuilder(2048); if (className) GetClassName(window, value, value.Capacity); else GetWindowText(window, value, value.Capacity); return value.ToString(); }
+        static void HandleConfirmation(bool accept)
+        {
+            IntPtr found = IntPtr.Zero; int count = 0; bool unexpected = false;
+            EnumThreadWindows(GetCurrentThreadId(), delegate(IntPtr window, IntPtr state) {
+                if (!IsWindowVisible(window) || Text(window, true) != "#32770") return true;
+                // Refuse other dialogs; never dismiss Windows security or
+                // installer refusal messages under the guise of consent.
+                uint owner; GetWindowThreadProcessId(window, out owner);
+                if (owner != receipt.fixturePid || Text(window, false) != "Install update" || GetWindow(window, 4) != updateForm.Handle) { unexpected = true; return false; }
+                found = window; count++; return true;
+            }, IntPtr.Zero);
+            Require(!unexpected);
+            if (count == 0) return;
+            Require(count == 1 && !dialogHandled);
+            IntPtr button = GetDlgItem(found, accept ? 6 : 7);
+            Require(button != IntPtr.Zero && IsWindowVisible(button) && IsWindowEnabled(button) && Text(button, true) == "Button" && Text(button, false).Replace("&", "") == (accept ? "Yes" : "No"));
+            dialogHandled = true; stage = accept ? 5 : 3;
+            if (accept) receipt.confirmedInstall = true;
+            Write(accept ? "install-confirmed" : "install-declined");
+            SendMessage(button, 0x00f5, IntPtr.Zero, IntPtr.Zero);
+            if (accept) {
+                afterYesClickReturned = true; receipt.afterYesClickReturned = true;
+                // A reentrant launch/close must keep its authoritative receipt.
+                if (receipt.status == "running") Write("yes-click-returned");
+            }
+        }
+        static void Fail(Exception error)
+        {
+            if (receipt.status == "failed") return;
+            receipt.status = "failed"; receipt.errorType = error.GetType().Name; receipt.hresult = error.HResult;
+            CopyException(receipt);
+            try { Write(receipt.phase); } catch (Exception) { }
+        }
+
+        internal sealed class WarningInputTelemetry
+        {
+            public int version = 1, phase = 0, revision = 0, sequenceOutcome = 0, moveEvents = 0, buttonEvents = 0, pointerSamples = 0;
+            // Phase: 0 none, 1 preflight, 2 consumed, 3 move returned,
+            // 4 pointer observed, 5 proof observed, 6 pair returned, 7 post observed.
+            public int virtualX = 0, virtualY = 0, virtualWidth = 0, virtualHeight = 0, runLeft = 0, runTop = 0, runRight = 0, runBottom = 0;
+            public int intendedX = 0, intendedY = 0, normalizedX = 0, normalizedY = 0, clipLeft = 0, clipTop = 0, clipRight = 0, clipBottom = 0;
+            public int moveX = 0, moveY = 0, postX = 0, postY = 0, preflightMs = 0, consumedMs = 0, moveStartedMs = 0, moveReturnedMs = 0, pointerMs = 0, proofMs = 0, buttonsStartedMs = 0, buttonsReturnedMs = 0, postMs = 0;
+            public bool clipQuerySucceeded = false, intendedInsideClip = false, postCursorQuerySucceeded = false, postEqualsIntended = false, postInsideRun = false;
+            public bool postHitOwnedRun = false, postHitOwnedWarning = false, warningStillPresent = false;
+            public bool moveCallStarted = false, moveReturned = false, moveCursorQuerySucceeded = false, moveInsideRun = false, moveHitOwnedRun = false, moveHitOwnedWarning = false, pointerVerified = false;
+            public bool finalProofObserved = false, finalProofVerified = false, buttonsCallStarted = false, buttonsReturned = false;
+            public bool proofClipQuerySucceeded = false, proofClipAllowsPoint = false;
+            internal WarningInputTelemetry Copy() { return (WarningInputTelemetry)MemberwiseClone(); }
+        }
+        internal class WarningObservation
+        {
+            public bool normalUnsignedWarningConsentPresent, normalUnsignedWarningConsentValidated, normalUnsignedWarningEligible;
+            public bool normalUnsignedWarningRunPosted, normalUnsignedWarningAccepted;
+            public bool normalUnsignedWarningSendAttempted, normalUnsignedWarningSendReturned;
+            public bool warningSendActiveVerified, warningSendForegroundVerified;
+            public bool normalUnsignedWarningInputAttempted;
+            public int warningInputEventsInserted;
+            public bool warningInputDesktopVerified, warningInputTargetVerified, warningInputSessionVerified, warningInputKeysReleased;
+            public bool warningInputActiveVerified, warningInputForegroundVerified;
+            public string warningInputGateStatus = "NotObserved";
+            public WarningInputTelemetry warningInputTelemetry = new WarningInputTelemetry();
+            public string normalUnsignedWarningActionMethod = "None";
+            public int normalUnsignedWarningRunCount;
+            public bool warningUiaPatternAvailable, warningUiaInvokeAttempted, warningUiaInvokeReturned;
+            public bool warningUiaSessionVerified, warningUiaDesktopVerified, warningUiaOwnerVerified, warningUiaMarkerWritten, warningUiaFinalFencePassed;
+            public string normalUnsignedWarningEligibility = "NotObserved";
+            public bool warningExactPathText, warningExactNameText, warningExactDirectoryText;
+            public bool warningRunButtonUnique, warningCancelButtonUnique, warningCheckboxUnique;
+            public bool warningCheckboxStateKnown, warningCheckboxChecked, warningVerifiedInstaller;
+            public bool warningVerifiedDescriptor, warningLaunchContextVerified;
+            public bool warningFileIdentityMatch;
+            public bool warningCompactedSuffixMatch;
+            public bool warningActivationObserved, warningDialogActive, warningDialogForeground, warningForegroundOwnedByFixture;
+            public bool warningRootEnabled, warningRunParentIsWarning, warningRunAncestorChainKnown, warningRunAncestorChainEnabled;
+            public int warningRunParentDepth;
+            public string warningRunParentClass = "None";
+            public string warningFileIdentityStatus = "NotObserved";
+            public string warningPathBinding = "None";
+            public bool warningTextContainsFullPath, warningTextContainsName, warningTextContainsDirectory;
+            public bool warningTextSysLink, warningTextAnchorParsed, warningTextBidiWrapped;
+            public string warningNameCarrierClass = "None", warningNameCarrierShape = "None", warningNameCarrierParse = "None";
+            public string warningNameCarrierMaskedShape = "";
+            public bool warningNameCarrierAttributeId, warningNameCarrierAttributeHref, warningNameCarrierAttributeCaseVariant, warningNameCarrierAttributeOther;
+            public bool warningNameCarrierLiteralName, warningNameCarrierLiteralPath, warningNameCarrierLiteralDirectory, warningNameCarrierLiteralBidi;
+            public bool warningTextOfficialUrl, warningTextOfficialOrigin;
+            internal WarningObservation Copy()
+            { var copy = (WarningObservation)MemberwiseClone(); copy.warningInputTelemetry = warningInputTelemetry.Copy(); return copy; }
+        }
+        static void ReadWarningConsent(string assets)
+        {
+            string path = Path.Combine(assets, "private-unsigned-warning-consent.json");
+            warningConsentPresent = File.Exists(path);
+            if (!warningConsentPresent) return; // DEFAULT OFF; no action authority.
+            OrdinaryPath(path); Require(new FileInfo(path).Length > 0 && new FileInfo(path).Length <= 4096);
+            string content = new UTF8Encoding(false, true).GetString(File.ReadAllBytes(path));
+            var value = json.Deserialize<Dictionary<string, object>>(content);
+            string[] keys = { "schema", "sourceSha", "setupSha256", "runId", "NormalOpenFileWarningOnly", "oneTime" };
+            Require(value != null && value.Count == keys.Length && keys.All(value.ContainsKey));
+            Require(value["schema"] as string == "taskbar-select-private-unsigned-warning-consent-v1" &&
+                value["sourceSha"] as string == Environment.GetEnvironmentVariable("GITHUB_SHA") &&
+                value["setupSha256"] as string == SetupHash && value["runId"] as string == Environment.GetEnvironmentVariable("GITHUB_RUN_ID") &&
+                value["NormalOpenFileWarningOnly"] is bool && (bool)value["NormalOpenFileWarningOnly"] && value["oneTime"] is bool && (bool)value["oneTime"]);
+            // The outer actual-event guard creates this protected optional
+            // marker only for an explicitly approved first attempt. The host
+            // still binds its exact current run/source/hash and six-key scope.
+            warningConsentValidated = true;
+        }
+        static void CopyWarning(WarningObservation target)
+        {
+            lock (warningGate) {
+                WarningObservation value = warningObservation.Copy();
+                foreach (FieldInfo field in typeof(WarningObservation).GetFields(BindingFlags.Public | BindingFlags.Instance)) field.SetValue(target, field.GetValue(value));
+                target.normalUnsignedWarningConsentPresent = warningConsentPresent;
+                target.normalUnsignedWarningConsentValidated = warningConsentValidated;
+                target.normalUnsignedWarningRunPosted = warningRunPosted;
+                target.normalUnsignedWarningSendAttempted = warningSendAttempted;
+                target.normalUnsignedWarningSendReturned = warningSendReturned;
+                target.warningSendActiveVerified = warningSendActiveVerified;
+                target.warningSendForegroundVerified = warningSendForegroundVerified;
+                target.normalUnsignedWarningInputAttempted = warningInputAttempted;
+                target.warningInputEventsInserted = Interlocked.CompareExchange(ref warningInputEventsInserted, 0, 0);
+                target.warningInputDesktopVerified = warningInputDesktopVerified;
+                target.warningInputTargetVerified = warningInputTargetVerified;
+                target.warningInputSessionVerified = warningInputSessionVerified;
+                target.warningInputKeysReleased = warningInputKeysReleased;
+                target.warningInputActiveVerified = warningInputActiveVerified;
+                target.warningInputForegroundVerified = warningInputForegroundVerified;
+                target.warningInputGateStatus = warningInputGateStatus;
+                // Later read-only probes cannot erase the single attempt's
+                // coherent telemetry or share its mutable publication object.
+                target.warningInputTelemetry = warningInputTelemetry.Copy();
+                target.normalUnsignedWarningActionMethod = warningActionMethod;
+                target.warningUiaPatternAvailable = warningUiaPatternAvailable;
+            target.warningUiaInvokeAttempted = warningUiaInvokeAttempted;
+            target.warningUiaInvokeReturned = warningUiaInvokeReturned;
+            target.warningUiaSessionVerified = warningUiaSessionVerified;
+            target.warningUiaDesktopVerified = warningUiaDesktopVerified;
+            target.warningUiaOwnerVerified = warningUiaOwnerVerified;
+            target.warningUiaMarkerWritten = warningUiaMarkerWritten;
+            target.warningUiaFinalFencePassed = warningUiaFinalFencePassed;
+            // A provider call/return never establishes acceptance. Only the
+            // updater's authenticated actual Setup process can do that.
+            target.normalUnsignedWarningAccepted = warningUiaInvokeAttempted && warningUiaMarkerWritten && warningUiaFinalFencePassed &&
+                warningConsentValidated && Interlocked.CompareExchange(ref setupIdentityAuthenticated, 0, 0) == 1;
+            target.normalUnsignedWarningRunCount = Interlocked.CompareExchange(ref warningRunAttempt, 0, 0);
+            }
+        }
+        static bool BoundedText(IntPtr window, out string text)
+        {
+            text = null; UIntPtr length, received;
+            if (SendMessageTimeout(window, 0x000e, UIntPtr.Zero, null, 2, 100, out length) == IntPtr.Zero || length.ToUInt64() > 8192) return false;
+            var buffer = new StringBuilder(8193);
+            if (SendMessageTimeout(window, 0x000d, new UIntPtr((uint)buffer.Capacity), buffer, 2, 100, out received) == IntPtr.Zero || received.ToUInt64() > 8192) return false;
+            text = buffer.ToString(); return true;
+        }
+        static bool WarningOwner(IntPtr window)
+        {
+            uint process; uint thread = GetWindowThreadProcessId(window, out process); string caption;
+            return process == receipt.fixturePid && thread == uiThread && IsWindowVisible(window) && Text(window, true) == "#32770" &&
+                BoundedText(window, out caption) && caption == "Open File - Security Warning";
+        }
+        static void ObserveWarningActivation(IntPtr window, WarningObservation observed)
+        {
+            // Read-only, scoped to the known fixture UI thread. No window is
+            // activated, attached, focused, clicked, or changed here. Handles
+            // and other windows' identities never enter either receipt.
+            var information = new WarningGuiThreadInformation { Size = (uint)Marshal.SizeOf(typeof(WarningGuiThreadInformation)) };
+            if (!GetGUIThreadInfo(uiThread, ref information)) return;
+            observed.warningActivationObserved = true;
+            observed.warningDialogActive = information.Active == window;
+            IntPtr foreground = GetForegroundWindow();
+            observed.warningDialogForeground = foreground == window;
+            uint owner; GetWindowThreadProcessId(foreground, out owner);
+            observed.warningForegroundOwnedByFixture = foreground != IntPtr.Zero && owner == receipt.fixturePid;
+        }
+        internal static string WarningParentClass(string nativeClass)
+        {
+            return nativeClass == "#32770" ? "Dialog" : nativeClass == "DirectUIHWND" ? "DirectUI" :
+                nativeClass == "Button" ? "Button" : nativeClass == "Static" ? "Static" : "Other";
+        }
+        static void ObserveWarningRunAncestors(IntPtr window, IntPtr run, WarningObservation observed)
+        {
+            // Metadata only. Walk actual parents, excluding window owners,
+            // only within this exact known fixture warning's PID/UI thread.
+            // Do not inspect any class or enabled state outside that chain.
+            if (!WarningOwner(window)) return;
+            observed.warningRootEnabled = IsWindowEnabled(window);
+            IntPtr current = run; bool enabled = true;
+            for (int depth = 0; depth <= 32; depth++) {
+                if (current == IntPtr.Zero) return;
+                uint owner; uint thread = GetWindowThreadProcessId(current, out owner);
+                if (owner != receipt.fixturePid || thread != uiThread || GetAncestor(current, 2) != window) return;
+                observed.warningRunParentDepth = depth;
+                enabled &= IsWindowEnabled(current);
+                if (depth == 1) {
+                    observed.warningRunParentIsWarning = current == window;
+                    observed.warningRunParentClass = WarningParentClass(Text(current, true));
+                }
+                if (current == window) {
+                    observed.warningRunAncestorChainKnown = true;
+                    observed.warningRunAncestorChainEnabled = enabled; return;
+                }
+                if (depth == 32) return;
+                current = GetAncestor(current, 1); // GA_PARENT excludes owner.
+            }
+        }
+        static bool FreshWarningPathText(IntPtr child, IntPtr window, string expected)
+        {
+            uint owner; uint thread = GetWindowThreadProcessId(child, out owner); string text;
+            return child != IntPtr.Zero && owner == receipt.fixturePid && thread == uiThread && GetAncestor(child, 2) == window &&
+                IsWindowVisible(child) && BoundedText(child, out text) && WarningTextMatches(Text(child, true), text, expected);
+        }
+        internal static bool WarningTextMatches(string nativeClass, string text, string expected)
+        {
+            if (String.IsNullOrEmpty(expected)) return false;
+            bool parsed; string literal = WarningLiteral(nativeClass, text, out parsed);
+            return String.Equals(literal, expected, StringComparison.OrdinalIgnoreCase);
+        }
+        static bool KnownOuterBidi(string text)
+        {
+            return text != null && text.Length >= 2 && ((text[0] == '\u202a' && text[text.Length - 1] == '\u202c') ||
+                (text[0] == '\u200e' && text[text.Length - 1] == '\u200e') || (text[0] == '\u200f' && text[text.Length - 1] == '\u200f'));
+        }
+        static string WarningLiteral(string nativeClass, string text, out bool parsed)
+        {
+            parsed = false;
+            // Plain controls retain their exact old comparison. Native SysLink
+            // encodes its displayed label in one <a> wrapper; only that wrapper
+            // is decoded, never href navigation or arbitrary markup.
+            if (text == null || nativeClass != "SysLink" || text.Length < 7 || !text.StartsWith("<a", StringComparison.OrdinalIgnoreCase) ||
+                !text.EndsWith("</a>", StringComparison.OrdinalIgnoreCase)) return text;
+            if (text.Length > 8192) return null;
+            try {
+                var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null,
+                    ConformanceLevel = ConformanceLevel.Document, MaxCharactersInDocument = 8192, MaxCharactersFromEntities = 0 };
+                var document = new XmlDocument { XmlResolver = null, PreserveWhitespace = true };
+                using (var input = new StringReader(text)) using (var reader = XmlReader.Create(input, settings)) document.Load(reader);
+                XmlElement root = document.DocumentElement;
+                if (root == null || document.ChildNodes.Count != 1 || (root.Name != "a" && root.Name != "A") || root.NamespaceURI.Length != 0 ||
+                    root.Prefix.Length != 0 || root.ChildNodes.Count != 1 || root.FirstChild.NodeType != XmlNodeType.Text || root.Attributes.Count > 2) return null;
+                bool id = false, href = false;
+                foreach (XmlAttribute attribute in root.Attributes) {
+                    if (attribute.NamespaceURI.Length != 0 || attribute.Prefix.Length != 0) return null;
+                    if (String.Equals(attribute.Name, "id", StringComparison.OrdinalIgnoreCase)) { if (id) return null; id = true; }
+                    else if (String.Equals(attribute.Name, "href", StringComparison.OrdinalIgnoreCase)) { if (href) return null; href = true; }
+                    else return null;
+                }
+                parsed = true; return root.InnerText;
+            } catch (XmlException) { return null; }
+        }
+        // Read-only structure diagnostics. No returned field is used by the
+        // matching/eligibility/action path above, and no text or attribute
+        // value is retained or serialized. Attribute casing remains visible
+        // in diagnostics even though native id/href are case-insensitive.
+        internal static WarningObservation DescribeWarningCarrier(string nativeClass, string text, string expected)
+        {
+            var value = new WarningObservation();
+            value.warningNameCarrierClass = nativeClass == "SysLink" || nativeClass == "Static" || nativeClass == "Edit" || nativeClass == "Button" ? nativeClass : "Other";
+            bool opens = text != null && text.StartsWith("<a", StringComparison.OrdinalIgnoreCase);
+            bool closes = text != null && text.EndsWith("</a>", StringComparison.OrdinalIgnoreCase);
+            value.warningNameCarrierShape = opens && closes ? "Anchored" : opens ? "OpenOnly" : closes ? "CloseOnly" :
+                text != null && text.IndexOf("<a", StringComparison.OrdinalIgnoreCase) >= 0 ? "EmbeddedAnchor" :
+                text != null && text.IndexOf('<') < 0 && text.IndexOf('>') < 0 ? "Plain" : "Other";
+            value.warningNameCarrierParse = "NotSysLink";
+            if (nativeClass != "SysLink") return value;
+            value.warningNameCarrierParse = "NotAnchored";
+            if (!opens || !closes) return value;
+            value.warningNameCarrierParse = "LengthBound";
+            if (text.Length > 8192) return value;
+            try {
+                var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null,
+                    ConformanceLevel = ConformanceLevel.Document, MaxCharactersInDocument = 8192, MaxCharactersFromEntities = 0 };
+                var document = new XmlDocument { XmlResolver = null, PreserveWhitespace = true };
+                using (var input = new StringReader(text)) using (var reader = XmlReader.Create(input, settings)) document.Load(reader);
+                XmlElement root = document.DocumentElement;
+                value.warningNameCarrierParse = "DocumentShape";
+                if (root == null || document.ChildNodes.Count != 1) return value;
+                value.warningNameCarrierParse = "RootName";
+                if (root.Name != "a" && root.Name != "A") return value;
+                value.warningNameCarrierParse = "RootNamespace";
+                if (root.NamespaceURI.Length != 0 || root.Prefix.Length != 0) return value;
+                value.warningNameCarrierParse = "ChildShape";
+                if (root.ChildNodes.Count != 1 || root.FirstChild.NodeType != XmlNodeType.Text) return value;
+                // These comparisons describe the sole literal text node,
+                // even if later attribute admission is rejected. They do not
+                // make that literal eligible for a Run click.
+                string literal = root.InnerText;
+                value.warningNameCarrierLiteralPath = String.Equals(literal, expected, StringComparison.OrdinalIgnoreCase);
+                value.warningNameCarrierLiteralName = String.Equals(literal, Path.GetFileName(expected), StringComparison.OrdinalIgnoreCase);
+                value.warningNameCarrierLiteralDirectory = String.Equals(literal, Path.GetDirectoryName(expected), StringComparison.OrdinalIgnoreCase);
+                value.warningNameCarrierLiteralBidi = KnownOuterBidi(literal);
+                value.warningNameCarrierParse = "AttributeCount";
+                if (root.Attributes.Count > 2) return value;
+                bool invalidNamespace = false, invalidName = false;
+                foreach (XmlAttribute attribute in root.Attributes) {
+                    bool id = attribute.Name == "id", href = attribute.Name == "href";
+                    bool caseVariant = !id && !href && (String.Equals(attribute.Name, "id", StringComparison.OrdinalIgnoreCase) || String.Equals(attribute.Name, "href", StringComparison.OrdinalIgnoreCase));
+                    value.warningNameCarrierAttributeId |= id;
+                    value.warningNameCarrierAttributeHref |= href;
+                    value.warningNameCarrierAttributeCaseVariant |= caseVariant;
+                    value.warningNameCarrierAttributeOther |= !id && !href && !caseVariant;
+                    invalidNamespace |= attribute.NamespaceURI.Length != 0 || attribute.Prefix.Length != 0;
+                    invalidName |= !id && !href;
+                }
+                value.warningNameCarrierParse = invalidNamespace ? "AttributeNamespace" : invalidName ? "AttributeName" : "Parsed";
+            } catch (XmlException) { value.warningNameCarrierParse = "XmlMalformed"; }
+            return value;
+        }
+        static string MergeDiagnosticEnum(string prior, string next)
+        {
+            return prior == "None" || prior == next ? next : "Mixed";
+        }
+        internal static string WarningMaskedShape(string text, string expectedName)
+        {
+            if (text == null) return "";
+            const string punctuation = ":/\\.~_-'\"<>=?&;()[] ";
+            var result = new StringBuilder();
+            for (int i = 0; i < text.Length; i++) {
+                if (result.Length >= 256) { result.Append("{BOUND}"); break; }
+                if (!String.IsNullOrEmpty(expectedName) && i + expectedName.Length <= text.Length &&
+                    String.Compare(text, i, expectedName, 0, expectedName.Length, StringComparison.OrdinalIgnoreCase) == 0) {
+                    result.Append("{SETUP}"); i += expectedName.Length - 1; continue;
+                }
+                char value = text[i];
+                switch (value) {
+                    case '\u200e': result.Append("{LRM}"); break;
+                    case '\u200f': result.Append("{RLM}"); break;
+                    case '\u202a': result.Append("{LRE}"); break;
+                    case '\u202c': result.Append("{PDF}"); break;
+                    case '\t': result.Append("{TAB}"); break;
+                    case '\r': result.Append("{CR}"); break;
+                    case '\n': result.Append("{LF}"); break;
+                    case '\ufeff': result.Append("{BOM}"); break;
+                    default: result.Append(Char.IsDigit(value) ? '0' : punctuation.IndexOf(value) >= 0 ? value : 'x'); break;
+                }
+            }
+            return result.ToString();
+        }
+        static void ObserveWarningCarrier(WarningObservation observed, string nativeClass, string text, string expected)
+        {
+            // Origin checks and filename-carrier selection are descriptive
+            // substring observations only. No substring is an action guard.
+            string official = AppUpdatePolicy.AssetUri(Target, AppUpdatePolicy.InstallerName(Target)).AbsoluteUri;
+            observed.warningTextOfficialUrl |= text.IndexOf(official, StringComparison.OrdinalIgnoreCase) >= 0;
+            observed.warningTextOfficialOrigin |= text.IndexOf("github.com", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (text.IndexOf(Path.GetFileName(expected), StringComparison.OrdinalIgnoreCase) < 0) return;
+            WarningObservation value = DescribeWarningCarrier(nativeClass, text, expected);
+            string masked = WarningMaskedShape(text, Path.GetFileName(expected));
+            observed.warningNameCarrierMaskedShape = observed.warningNameCarrierMaskedShape.Length == 0 || observed.warningNameCarrierMaskedShape == masked ? masked : "{MULTIPLE}";
+            observed.warningNameCarrierClass = MergeDiagnosticEnum(observed.warningNameCarrierClass, value.warningNameCarrierClass);
+            observed.warningNameCarrierShape = MergeDiagnosticEnum(observed.warningNameCarrierShape, value.warningNameCarrierShape);
+            observed.warningNameCarrierParse = MergeDiagnosticEnum(observed.warningNameCarrierParse, value.warningNameCarrierParse);
+            observed.warningNameCarrierAttributeId |= value.warningNameCarrierAttributeId;
+            observed.warningNameCarrierAttributeHref |= value.warningNameCarrierAttributeHref;
+            observed.warningNameCarrierAttributeCaseVariant |= value.warningNameCarrierAttributeCaseVariant;
+            observed.warningNameCarrierAttributeOther |= value.warningNameCarrierAttributeOther;
+            observed.warningNameCarrierLiteralName |= value.warningNameCarrierLiteralName;
+            observed.warningNameCarrierLiteralPath |= value.warningNameCarrierLiteralPath;
+            observed.warningNameCarrierLiteralDirectory |= value.warningNameCarrierLiteralDirectory;
+            observed.warningNameCarrierLiteralBidi |= value.warningNameCarrierLiteralBidi;
+        }
+        static bool WarningLaunchContext(string expected)
+        {
+            VerifiedAppUpdate descriptor = retainedVerified;
+            if (Interlocked.CompareExchange(ref stage, 0, 0) != 5 || receipt.status != "running" || !dialogHandled || !receipt.confirmedInstall ||
+                !receipt.declinedInstallConfirmed || !retainedDescriptorReturnedAfterNo || !Launching() || ActiveLaunch() != null || descriptor == null ||
+                Field<VerifiedAppUpdate>("verified") != null || !Field<bool>("busy") || Field<bool>("closing") ||
+                descriptor.Version != Target || descriptor.Sha256 != SetupHash || !Same(descriptor.InstallerPath, expected)) return false;
+            ProcessStartInfo info = AppUpdateInstaller.StartInfo(descriptor.InstallerPath);
+            return info.UseShellExecute && info.Verb == "open" && info.Arguments == "" && Same(info.FileName, expected);
+        }
+        internal static string WarningMetadataPath(string nativeClass, string literal, string expected, out string reason)
+        {
+            reason = "NotDosPath";
+            if (nativeClass != "SysLink") return null;
+            string candidate = AdministratorLaunch.CanonicalDosPath(literal);
+            if (candidate == null) return null;
+            reason = "WrongLeaf";
+            if (!String.Equals(Path.GetFileName(candidate), AppUpdatePolicy.InstallerName(Target), StringComparison.OrdinalIgnoreCase)) return null;
+            reason = "WrongVolume";
+            if (!String.Equals(Path.GetPathRoot(candidate), Path.GetPathRoot(expected), StringComparison.OrdinalIgnoreCase)) return null;
+            reason = "Match"; return candidate;
+        }
+        static bool WarningSameFile(AdministratorLaunch.FileInformation a, AdministratorLaunch.FileInformation b)
+        {
+            return AdministratorLaunch.SafeInformation(a, false) && AdministratorLaunch.SafeInformation(b, false) &&
+                a.Volume == b.Volume && a.IndexHigh == b.IndexHigh && a.IndexLow == b.IndexLow;
+        }
+        static bool WarningPhysicalIdentity(string nativeClass, string literal, string expected, FileStream lease, out string reason)
+        {
+            reason = "ReadFailed";
+            var ancestors = new List<SafeFileHandle>();
+            try {
+                string candidate = WarningMetadataPath(nativeClass, literal, expected, out reason);
+                if (candidate == null) return false;
+                reason = "WrongVolume";
+                string root = Path.GetPathRoot(candidate);
+                if (new DriveInfo(root).DriveType != DriveType.Fixed) return false;
+                var staged = (IAppUpdateFile)typeof(VerifiedAppUpdate).GetField("file", Instance).GetValue(retainedVerified);
+                var descriptorStream = staged == null ? null : staged.Content as FileStream;
+                AdministratorLaunch.FileInformation pinned, independentlyPinned;
+                reason = "MetadataFailed";
+                if (descriptorStream == null || !WarningFileInformation(descriptorStream.SafeFileHandle, out pinned) ||
+                    !WarningFileInformation(lease.SafeFileHandle, out independentlyPinned) || !WarningSameFile(pinned, independentlyPinned)) return false;
+                string parent = Path.GetDirectoryName(candidate), current = root;
+                var directories = new List<string> { root };
+                foreach (string part in parent.Substring(root.Length).Split('\\')) {
+                    if (part.Length == 0) continue; current = Path.Combine(current, part); directories.Add(current);
+                }
+                reason = "AncestorBound";
+                if (directories.Count > 64) return false;
+                foreach (string directory in directories) {
+                    // Desired access zero permits metadata only. Denying delete
+                    // sharing pins every ordinary ancestor while the alias is
+                    // resolved; OPEN_REPARSE_POINT prevents link traversal at
+                    // each inspected final component.
+                    SafeFileHandle handle = OpenWarningMetadataPath(directory, 0, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+                    ancestors.Add(handle); AdministratorLaunch.FileInformation information;
+                    reason = "UnsafeAncestor";
+                    if (handle == null || handle.IsInvalid || !WarningFileInformation(handle, out information) ||
+                        !AdministratorLaunch.SafeInformation(information, true) || information.Volume != pinned.Volume) return false;
+                }
+                reason = "OpenFailed";
+                using (SafeFileHandle observed = OpenWarningMetadataPath(candidate, 0, 1, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero)) {
+                    if (observed == null || observed.IsInvalid) return false;
+                    AdministratorLaunch.FileInformation information;
+                    reason = "MetadataFailed";
+                    if (!WarningFileInformation(observed, out information)) return false;
+                    reason = "UnsafeFile";
+                    if (!AdministratorLaunch.SafeInformation(information, false)) return false;
+                    reason = "DifferentFile";
+                    if (!WarningSameFile(pinned, information)) return false;
+                    reason = "Match"; return true;
+                }
+            } catch (Exception) { reason = "ReadFailed"; return false; }
+            finally { foreach (SafeFileHandle handle in ancestors) if (handle != null) handle.Dispose(); }
+        }
+        static bool FreshWarningPhysicalIdentity(IntPtr child, IntPtr window, string expected, FileStream lease)
+        {
+            uint owner; uint thread = GetWindowThreadProcessId(child, out owner); string text, reason;
+            if (child == IntPtr.Zero || owner != receipt.fixturePid || thread != uiThread || GetAncestor(child, 2) != window ||
+                !IsWindowVisible(child) || !BoundedText(child, out text)) return false;
+            bool parsed; string nativeClass = Text(child, true), literal = WarningLiteral(nativeClass, text, out parsed);
+            return WarningPhysicalIdentity(nativeClass, literal, expected, lease, out reason);
+        }
+        internal static bool WarningCompactedSuffixMatches(string nativeClass, string text, string expected)
+        {
+            // A native warning can compact its path to the random staging
+            // folder's visible tail. This CI-only format is evidence solely
+            // within the retained descriptor's verified single Shell launch.
+            // Never resolve, open, navigate, or execute the ellipsized text.
+            if (nativeClass != "SysLink" || text == null || !text.StartsWith("...", StringComparison.Ordinal) ||
+                AdministratorLaunch.CanonicalDosPath(expected) == null ||
+                !String.Equals(Path.GetFileName(expected), AppUpdatePolicy.InstallerName(Target), StringComparison.OrdinalIgnoreCase)) return false;
+            string parent = Path.GetFileName(Path.GetDirectoryName(expected));
+            if (parent.Length != 41 || !parent.StartsWith("download-", StringComparison.Ordinal)) return false;
+            string random = parent.Substring(9);
+            foreach (char value in random) if (!((value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'))) return false;
+            string body = text.Substring(3); int slash = body.IndexOf('\\');
+            if (slash < 12 || slash > 32 || slash != body.LastIndexOf('\\')) return false;
+            string tail = body.Substring(0, slash);
+            foreach (char value in tail) if (!((value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') || (value >= 'A' && value <= 'F'))) return false;
+            return String.Equals(body.Substring(slash + 1), AppUpdatePolicy.InstallerName(Target), StringComparison.OrdinalIgnoreCase) &&
+                random.EndsWith(tail, StringComparison.OrdinalIgnoreCase) && expected.EndsWith(body, StringComparison.OrdinalIgnoreCase);
+        }
+        static bool FreshWarningCompactedSuffix(IntPtr child, IntPtr window, string expected)
+        {
+            uint owner; uint thread = GetWindowThreadProcessId(child, out owner); string text;
+            return child != IntPtr.Zero && owner == receipt.fixturePid && thread == uiThread && GetAncestor(child, 2) == window &&
+                IsWindowVisible(child) && BoundedText(child, out text) && WarningCompactedSuffixMatches(Text(child, true), text, expected);
+        }
+        internal static bool WarningFileContradiction(string reason)
+        {
+            return reason == "DifferentFile" || reason == "UnsafeFile" || reason == "UnsafeAncestor" || reason == "WrongVolume";
+        }
+        internal static bool WarningSendGate(bool differentThread, bool observed, bool active, bool foreground)
+        {
+            return differentThread && observed && active && foreground;
+        }
+        internal static bool WarningInputGate(bool differentThread, bool session, bool desktop, bool active, bool foreground, bool ancestors, bool target, bool keys, bool noCapture)
+        {
+            return differentThread && session && desktop && active && foreground && ancestors && target && keys && noCapture;
+        }
+        internal static bool WarningInputAccepted(bool attempted, int inserted, bool consent, bool setupAuthenticated)
+        {
+            return attempted && inserted == 3 && consent && setupAuthenticated;
+        }
+        internal static int[] WarningInputCoordinates(int left, int top, int right, int bottom, int virtualX, int virtualY, int virtualWidth, int virtualHeight)
+        {
+            long width = (long)right - left, height = (long)bottom - top;
+            if (width < 8 || width > 4096 || height < 8 || height > 4096 || virtualWidth < 2 || virtualWidth > 32768 || virtualHeight < 2 || virtualHeight > 32768) return null;
+            long x = (long)left + width / 2, y = (long)top + height / 2;
+            long relativeX = x - virtualX, relativeY = y - virtualY;
+            if (left < (long)virtualX || top < (long)virtualY || right > (long)virtualX + virtualWidth || bottom > (long)virtualY + virtualHeight ||
+                relativeX < 0 || relativeX >= virtualWidth || relativeY < 0 || relativeY >= virtualHeight ||
+                x < Int32.MinValue || x > Int32.MaxValue || y < Int32.MinValue || y > Int32.MaxValue) return null;
+            int normalizedX = (int)((relativeX * 65535 + (virtualWidth - 1) / 2) / (virtualWidth - 1));
+            int normalizedY = (int)((relativeY * 65535 + (virtualHeight - 1) / 2) / (virtualHeight - 1));
+            if (normalizedX < 0 || normalizedX > 65535 || normalizedY < 0 || normalizedY > 65535) return null;
+            return new[] { (int)x, (int)y, normalizedX, normalizedY };
+        }
+        internal static WarningNativeInput[] WarningInputBatch(int normalizedX, int normalizedY)
+        {
+            if (normalizedX < 0 || normalizedX > 65535 || normalizedY < 0 || normalizedY > 65535) throw new ArgumentOutOfRangeException();
+            var result = new WarningNativeInput[3];
+            result[0].Value.Mouse.X = normalizedX; result[0].Value.Mouse.Y = normalizedY;
+            result[0].Value.Mouse.Flags = 0x0001 | 0x8000 | 0x4000; // absolute virtual-desktop move
+            result[1].Value.Mouse.Flags = 0x0002; // one left down
+            result[2].Value.Mouse.Flags = 0x0004; // one left up
+            return result;
+        }
+        internal static bool WarningClipAllows(bool queried, int left, int top, int right, int bottom, int x, int y)
+        {
+            return queried && (long)right - left > 0 && (long)bottom - top > 0 &&
+                x >= left && x < right && y >= top && y < bottom;
+        }
+        internal static bool WarningRunAllows(int left, int top, int right, int bottom, int x, int y)
+        {
+            long width = (long)right - left, height = (long)bottom - top;
+            return width >= 8 && width <= 4096 && height >= 8 && height <= 4096 &&
+                (long)x > left && (long)x < (long)right - 1 && (long)y > top && (long)y < (long)bottom - 1;
+        }
+        internal sealed class WarningInputSequenceApi
+        {
+            internal Func<bool> Consume = null, FinalProof = null;
+            internal Func<int> Move = null, PointerState = null, Buttons = null;
+            internal Func<long> Now = null;
+            internal Action Pause = null;
+        }
+        internal sealed class WarningInputSequenceResult
+        {
+            internal bool Consumed, MoveReturned, PointerVerified, FinalProofVerified, ButtonsReturned;
+            internal int MoveEvents, ButtonEvents, Samples, Outcome;
+        }
+        internal static WarningInputSequenceResult WarningInputSequence(WarningInputSequenceApi api, long deadline)
+        {
+            var result = new WarningInputSequenceResult();
+            if (api == null || api.Consume == null || api.Move == null || api.PointerState == null || api.FinalProof == null ||
+                api.Buttons == null || api.Now == null || api.Pause == null || api.Now() >= deadline) return result;
+            // Stateless policy: one consumption, one move, bounded observation,
+            // one fresh proof and at most one down/up pair. Never repair or retry.
+            if (!api.Consume()) return result;
+            result.Consumed = true;
+            try {
+                if (api.Now() >= deadline) { result.Outcome = 1; return result; }
+                result.MoveEvents = api.Move(); result.MoveReturned = true;
+                if (result.MoveEvents != 1) { result.Outcome = 2; return result; }
+                for (int sample = 0; sample < 32 && api.Now() < deadline; sample++) {
+                    result.Samples++;
+                    int pointer = api.PointerState();
+                    if (pointer < 0 || pointer > 1) { result.Outcome = 3; return result; }
+                    if (pointer == 1) { result.PointerVerified = true; break; }
+                    api.Pause();
+                }
+                if (!result.PointerVerified) { result.Outcome = api.Now() >= deadline ? 1 : 3; return result; }
+                if (api.Now() >= deadline) { result.Outcome = 1; return result; }
+                if (!api.FinalProof()) { result.Outcome = api.Now() >= deadline ? 1 : 4; return result; }
+                result.FinalProofVerified = true;
+                if (api.Now() >= deadline) { result.Outcome = 1; return result; }
+                result.ButtonEvents = api.Buttons(); result.ButtonsReturned = true;
+                result.Outcome = result.ButtonEvents == 2 ? 6 : 5;
+            } catch (Exception) { result.Outcome = 7; }
+            return result;
+        }
+        static void PublishWarningInputTelemetry(WarningInputTelemetry value)
+        {
+            lock (warningGate) if (value.phase >= warningInputTelemetry.phase) {
+                value.revision = checked(++warningInputTelemetryRevision);
+                warningInputTelemetry = value.Copy();
+            }
+        }
+        static bool WarningPointerOwned(IntPtr window)
+        {
+            uint process; return window != IntPtr.Zero && GetWindowThreadProcessId(window, out process) == uiThread && process == receipt.fixturePid;
+        }
+        static bool WarningPointerAtRun(WarningInputTelemetry value, IntPtr window, IntPtr run, bool record)
+        {
+            WarningInputPoint point;
+            bool queried = GetCursorPos(out point);
+            bool inside = queried && WarningRunAllows(value.runLeft, value.runTop, value.runRight, value.runBottom, point.X, point.Y);
+            IntPtr hit = queried ? WindowFromPoint(point) : IntPtr.Zero;
+            bool owned = WarningPointerOwned(hit);
+            IntPtr root = owned ? GetAncestor(hit, 2) : IntPtr.Zero;
+            bool warningHit = owned && (hit == window || root == window);
+            bool runHit = warningHit && hit == run;
+            if (record) {
+                value.moveCursorQuerySucceeded = queried; value.moveX = queried ? point.X : 0; value.moveY = queried ? point.Y : 0;
+                value.moveInsideRun = inside; value.moveHitOwnedRun = runHit; value.moveHitOwnedWarning = warningHit;
+                value.pointerVerified = queried && inside && runHit; value.pointerSamples++;
+                value.pointerMs = checked((int)clock.ElapsedMilliseconds); value.phase = 4;
+                PublishWarningInputTelemetry(value);
+            }
+            return queried && inside && runHit;
+        }
+        static bool WarningControlsStillMatch(IntPtr window, IntPtr run, IntPtr cancel, IntPtr checkbox, long deadline)
+        {
+            int visible = 0, runs = 0, cancels = 0, checks = 0; bool valid = true;
+            EnumChildWindows(window, delegate(IntPtr child, IntPtr state) {
+                if (Stopwatch.GetTimestamp() >= deadline) { valid = false; return false; }
+                if (!IsWindowVisible(child)) return true;
+                if (++visible > 64 || !WarningPointerOwned(child) || GetAncestor(child, 2) != window) { valid = false; return false; }
+                if (Text(child, true) != "Button") return true;
+                string text;
+                if (!BoundedText(child, out text)) { valid = false; return false; }
+                string label = text.Replace("&", ""); int kind = (int)(GetWindowStyle(child, -16).ToInt64() & 15);
+                if ((kind == 0 || kind == 1) && label == "Run" && IsWindowEnabled(child)) { runs++; valid &= child == run; }
+                if ((kind == 0 || kind == 1) && label == "Cancel" && IsWindowEnabled(child)) { cancels++; valid &= child == cancel; }
+                if ((kind == 2 || kind == 3) && label == "Always ask before opening this file") { checks++; valid &= child == checkbox; }
+                return valid;
+            }, IntPtr.Zero);
+            return valid && runs == 1 && cancels == 1 && checks == 1;
+        }
+        static void ObserveWarningInputResult(WarningInputTelemetry value, IntPtr window, IntPtr run)
+        {
+            // Observation only: never activate, repair clipping, reposition,
+            // send another input, or infer launch acceptance from pointer state.
+            try {
+                WarningInputPoint point;
+                value.postCursorQuerySucceeded = GetCursorPos(out point);
+                if (value.postCursorQuerySucceeded) {
+                    value.postX = point.X; value.postY = point.Y;
+                    value.postEqualsIntended = point.X == value.intendedX && point.Y == value.intendedY;
+                    value.postInsideRun = WarningClipAllows(true, value.runLeft, value.runTop, value.runRight, value.runBottom, point.X, point.Y);
+                    IntPtr hit = WindowFromPoint(point);
+                    bool owned = WarningPointerOwned(hit);
+                    IntPtr root = owned ? GetAncestor(hit, 2) : IntPtr.Zero;
+                    value.postHitOwnedWarning = owned && (hit == window || root == window);
+                    value.postHitOwnedRun = value.postHitOwnedWarning && hit == run;
+                }
+                value.warningStillPresent = WarningPointerOwned(window) && IsWindowVisible(window) && GetAncestor(window, 2) == window;
+            } catch (Exception) { /* An unavailable post-read is diagnostic, never a second action. */ }
+            value.postMs = checked((int)clock.ElapsedMilliseconds); value.phase = 7;
+            PublishWarningInputTelemetry(value);
+        }
+        static bool WarningInputSession()
+        {
+            using (var own = Process.GetCurrentProcess()) {
+                if ((uint)own.Id != receipt.fixturePid || own.SessionId <= 0) return false;
+                IntPtr data = IntPtr.Zero; uint bytes;
+                try {
+                    // WTSConnectState, scoped to this exact fixture session.
+                    return WarningSessionInformation(IntPtr.Zero, (uint)own.SessionId, 8, out data, out bytes) && data != IntPtr.Zero && bytes == 4 && Marshal.ReadInt32(data) == 0;
+                } finally { if (data != IntPtr.Zero) WTSFreeMemory(data); }
+            }
+        }
+        static bool WarningObjectName(IntPtr handle, string expected)
+        {
+            if (handle == IntPtr.Zero) return false;
+            uint bytes; WarningUserObjectInformation(handle, 2, IntPtr.Zero, 0, out bytes);
+            if (bytes < 2 || bytes > 512 || bytes % 2 != 0) return false;
+            IntPtr value = Marshal.AllocHGlobal((int)bytes);
+            try {
+                for (int i = 0; i < bytes; i++) Marshal.WriteByte(value, i, 0);
+                uint returned;
+                return WarningUserObjectInformation(handle, 2, value, bytes, out returned) && returned > 0 && returned <= bytes &&
+                    String.Equals(Marshal.PtrToStringUni(value, (int)bytes / 2).TrimEnd('\0'), expected, StringComparison.OrdinalIgnoreCase);
+            } finally { Marshal.FreeHGlobal(value); }
+        }
+        static bool WarningInputDesktop()
+        {
+            IntPtr station = GetProcessWindowStation();
+            if (!WarningObjectName(station, "WinSta0")) return false;
+            IntPtr flags = Marshal.AllocHGlobal(12);
+            try {
+                uint bytes;
+                if (!WarningUserObjectInformation(station, 1, flags, 12, out bytes) || bytes != 12 || (Marshal.ReadInt32(flags, 8) & 1) == 0) return false;
+            } finally { Marshal.FreeHGlobal(flags); }
+            IntPtr input = OpenInputDesktop(0, false, 1); // DESKTOP_READOBJECTS only
+            if (input == IntPtr.Zero) return false;
+            try {
+                return WarningObjectName(input, "Default") && WarningObjectName(GetThreadDesktop(uiThread), "Default") &&
+                    WarningObjectName(GetThreadDesktop(GetCurrentThreadId()), "Default");
+            } finally { CloseDesktop(input); }
+        }
+        static bool WarningInputKeysReleased()
+        {
+            foreach (int key in new[] { 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x5b, 0x5c })
+                if ((GetAsyncKeyState(key) & 0x8000) != 0) return false;
+            return GetSystemMetrics(23) == 0; // refuse swapped primary buttons
+        }
+        static bool SameWarningRectangle(WarningRectangle a, WarningRectangle b)
+        { return a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom; }
+        static bool WarningInputTarget(IntPtr window, IntPtr run, out WarningRectangle rectangle, out int[] coordinates, out WarningInputTelemetry telemetry)
+        {
+            coordinates = null; telemetry = null; rectangle = new WarningRectangle();
+            uint owner; uint thread = GetWindowThreadProcessId(run, out owner);
+            if (!WarningOwner(window) || run == IntPtr.Zero || owner != receipt.fixturePid || thread != uiThread || GetAncestor(run, 2) != window ||
+                !IsWindowVisible(run) || !IsWindowEnabled(run) || Text(run, true) != "Button" ||
+                !AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(), new IntPtr(-4)) ||
+                !GetWindowRect(run, out rectangle)) return false;
+            int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77), width = GetSystemMetrics(78), height = GetSystemMetrics(79);
+            coordinates = WarningInputCoordinates(rectangle.Left, rectangle.Top, rectangle.Right, rectangle.Bottom, vx, vy, width, height);
+            if (coordinates == null || WindowFromPoint(new WarningInputPoint { X = coordinates[0], Y = coordinates[1] }) != run) return false;
+            telemetry = new WarningInputTelemetry { virtualX = vx, virtualY = vy, virtualWidth = width, virtualHeight = height,
+                runLeft = rectangle.Left, runTop = rectangle.Top, runRight = rectangle.Right, runBottom = rectangle.Bottom,
+                intendedX = coordinates[0], intendedY = coordinates[1], normalizedX = coordinates[2], normalizedY = coordinates[3] };
+            return true;
+        }
+        internal static string WarningPathBinding(bool exactPath, bool exactName, bool exactDirectory, bool verifiedDescriptor, bool verifiedContext, bool fileIdentity, bool compactedSuffix)
+        {
+            if (exactPath) return "ExactPath";
+            if (exactName && exactDirectory) return "ExactNameAndDirectory";
+            if (exactName && verifiedDescriptor && verifiedContext) return "ExactNameVerifiedLaunchContext";
+            if (fileIdentity && verifiedDescriptor && verifiedContext) return "ExactFileIdentity";
+            return compactedSuffix && verifiedDescriptor && verifiedContext ? "ExactCompactedVerifiedSuffix" : "None";
+        }
+        static bool FinalUiaFence(IntPtr window, IntPtr run, IntPtr checkbox, string expected, long deadline)
+        {
+            if (Stopwatch.GetTimestamp() >= deadline || !WarningOwner(window) || !WarningLaunchContext(expected)) return false;
+            string text; UIntPtr state;
+            if (!BoundedText(run, out text) || text.Replace("&", "") != "Run" ||
+                SendMessageTimeout(checkbox, 0x00f0, UIntPtr.Zero, null, 2, 100, out state) == IntPtr.Zero || state.ToUInt64() != 1) return false;
+            // No file/provider calls after here. Refresh the complete native
+            // target and routing fence after marker Flush and bounded text reads.
+            uint owner; uint thread = GetWindowThreadProcessId(run, out owner);
+            if (owner != receipt.fixturePid || thread != uiThread || GetAncestor(run, 2) != window ||
+                Text(run, true) != "Button" || (GetWindowStyle(run, -16).ToInt64() & 15) > 1 ||
+                !IsWindowVisible(window) || !IsWindowEnabled(window) || !IsWindowVisible(run) || !IsWindowEnabled(run)) return false;
+            var ancestors = new WarningObservation(); ObserveWarningRunAncestors(window, run, ancestors);
+            if (!ancestors.warningRootEnabled || !ancestors.warningRunAncestorChainKnown || !ancestors.warningRunAncestorChainEnabled ||
+                !WarningInputSession() || !WarningInputDesktop() || !WarningInputKeysReleased()) return false;
+            var gui = new WarningGuiThreadInformation { Size = (uint)Marshal.SizeOf(typeof(WarningGuiThreadInformation)) };
+            return GetGUIThreadInfo(uiThread, ref gui) && gui.Active == window && gui.Capture == IntPtr.Zero &&
+                gui.MenuOwner == IntPtr.Zero && gui.MoveSize == IntPtr.Zero && (gui.Flags & 0x1e) == 0 &&
+                GetForegroundWindow() == window && Stopwatch.GetTimestamp() < deadline;
+        }
+        static void ProbeNormalWarning(IntPtr window)
+        {
+            long began = Stopwatch.GetTimestamp();
+            if (began <= 0 || began > Int64.MaxValue - Stopwatch.Frequency * 5L) return;
+            long invokeDeadline = began + Stopwatch.Frequency * 5L;
+            var observed = new WarningObservation { normalUnsignedWarningEligibility = "StateNotEligible" };
+            try {
+                if (Interlocked.CompareExchange(ref stage, 0, 0) != 5 || !Launching() || ActiveLaunch() != null) return;
+                observed.normalUnsignedWarningEligibility = "OwnerMismatch";
+                if (!WarningOwner(window)) return;
+                ObserveWarningActivation(window, observed);
+                observed.warningRootEnabled = IsWindowEnabled(window);
+                string expected = AdministratorLaunch.CanonicalDosPath(receipt.setupPath);
+                observed.normalUnsignedWarningEligibility = "FileMismatch";
+                if (expected == null || Path.GetFileName(expected) != AppUpdatePolicy.InstallerName(Target) || receipt.setupSha256 != SetupHash) return;
+                OrdinaryPath(expected);
+                using (var lease = new FileStream(expected, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                    if (AppUpdateService.Hash(lease, CancellationToken.None) != SetupHash) return;
+                    observed.warningVerifiedInstaller = true;
+                    observed.warningLaunchContextVerified = WarningLaunchContext(expected);
+                    if (!observed.warningLaunchContextVerified) return;
+                    retainedVerified.VerifyForLaunch();
+                    observed.warningVerifiedDescriptor = true;
+                    var children = new List<IntPtr>(); bool bounded = false, ownerChanged = false;
+                    EnumChildWindows(window, delegate(IntPtr child, IntPtr state) {
+                        if (!IsWindowVisible(child)) return true;
+                        uint owner; uint thread = GetWindowThreadProcessId(child, out owner);
+                        if (owner != receipt.fixturePid || thread != uiThread || GetAncestor(child, 2) != window) { ownerChanged = true; return false; }
+                        if (children.Count >= 64) { bounded = true; return false; }
+                        children.Add(child); return true;
+                    }, IntPtr.Zero);
+                    observed.normalUnsignedWarningEligibility = ownerChanged ? "OwnerMismatch" : "EnumerationBound";
+                    if (ownerChanged || bounded) return;
+                    var watch = Stopwatch.StartNew(); var run = new List<IntPtr>(); var cancel = new List<IntPtr>(); var checkbox = new List<IntPtr>();
+                    IntPtr pathText = IntPtr.Zero, nameText = IntPtr.Zero, directoryText = IntPtr.Zero, identityText = IntPtr.Zero, compactedText = IntPtr.Zero;
+                    string contradiction = null;
+                    foreach (IntPtr child in children) {
+                        string text;
+                        observed.normalUnsignedWarningEligibility = "ReadFailed";
+                        if (watch.ElapsedMilliseconds > 3000 || !BoundedText(child, out text)) return;
+                        string nativeClass = Text(child, true); bool parsed;
+                        string literal = WarningLiteral(nativeClass, text, out parsed);
+                        observed.warningTextContainsFullPath |= text.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0;
+                        observed.warningTextContainsName |= text.IndexOf(Path.GetFileName(expected), StringComparison.OrdinalIgnoreCase) >= 0;
+                        observed.warningTextContainsDirectory |= text.IndexOf(Path.GetDirectoryName(expected), StringComparison.OrdinalIgnoreCase) >= 0;
+                        observed.warningTextSysLink |= nativeClass == "SysLink"; observed.warningTextAnchorParsed |= parsed;
+                        observed.warningTextBidiWrapped |= KnownOuterBidi(text) || KnownOuterBidi(literal);
+                        ObserveWarningCarrier(observed, nativeClass, text, expected);
+                        if (WarningCompactedSuffixMatches(nativeClass, text, expected)) {
+                            observed.warningCompactedSuffixMatch = true; if (compactedText == IntPtr.Zero) compactedText = child;
+                        }
+                        string identityReason;
+                        bool identityMatch = WarningPhysicalIdentity(nativeClass, literal, expected, lease, out identityReason);
+                        if (WarningFileContradiction(identityReason) && contradiction == null) contradiction = identityReason;
+                        if (identityMatch) {
+                            observed.warningFileIdentityMatch = true; observed.warningFileIdentityStatus = "Match";
+                            if (identityText == IntPtr.Zero) identityText = child;
+                        } else if (!observed.warningFileIdentityMatch && nativeClass == "SysLink" &&
+                            text.IndexOf(Path.GetFileName(expected), StringComparison.OrdinalIgnoreCase) >= 0) {
+                            // Selection of this diagnostic reason is read-only;
+                            // identity admission above never uses Contains.
+                            observed.warningFileIdentityStatus = identityReason;
+                        }
+                        if (String.Equals(literal, expected, StringComparison.OrdinalIgnoreCase)) { observed.warningExactPathText = true; if (pathText == IntPtr.Zero) pathText = child; }
+                        if (String.Equals(literal, Path.GetFileName(expected), StringComparison.OrdinalIgnoreCase)) { observed.warningExactNameText = true; if (nameText == IntPtr.Zero) nameText = child; }
+                        if (String.Equals(literal, Path.GetDirectoryName(expected), StringComparison.OrdinalIgnoreCase)) { observed.warningExactDirectoryText = true; if (directoryText == IntPtr.Zero) directoryText = child; }
+                        if (nativeClass != "Button") continue;
+                        string label = text.Replace("&", ""); int kind = (int)(GetWindowStyle(child, -16).ToInt64() & 15);
+                        if ((kind == 0 || kind == 1) && label == "Run" && IsWindowEnabled(child)) run.Add(child);
+                        if ((kind == 0 || kind == 1) && label == "Cancel" && IsWindowEnabled(child)) cancel.Add(child);
+                        if ((kind == 2 || kind == 3) && label == "Always ask before opening this file") checkbox.Add(child);
+                    }
+                    // An admitted DOS candidate naming another or unsafe file
+                    // contradicts the intended launch. No other text/control
+                    // binding may override that physical evidence.
+                    if (contradiction != null) {
+                        observed.normalUnsignedWarningEligibility = "FileMismatch";
+                        observed.warningFileIdentityStatus = contradiction; return;
+                    }
+                    observed.normalUnsignedWarningEligibility = "PathUnproved";
+                    observed.warningPathBinding = WarningPathBinding(observed.warningExactPathText, observed.warningExactNameText, observed.warningExactDirectoryText,
+                        observed.warningVerifiedDescriptor, observed.warningLaunchContextVerified, observed.warningFileIdentityMatch, observed.warningCompactedSuffixMatch);
+                    if (observed.warningPathBinding == "None") return;
+                    observed.warningRunButtonUnique = run.Count == 1; observed.warningCancelButtonUnique = cancel.Count == 1; observed.warningCheckboxUnique = checkbox.Count == 1;
+                    observed.normalUnsignedWarningEligibility = "ControlsUnproved";
+                    if (!observed.warningRunButtonUnique || !observed.warningCancelButtonUnique) return;
+                    ObserveWarningRunAncestors(window, run[0], observed);
+                    observed.normalUnsignedWarningEligibility = "CheckboxUnproved";
+                    if (!observed.warningCheckboxUnique) return;
+                    UIntPtr check;
+                    if (SendMessageTimeout(checkbox[0], 0x00f0, UIntPtr.Zero, null, 2, 100, out check) == IntPtr.Zero || check.ToUInt64() > 1) return;
+                    observed.warningCheckboxStateKnown = true; observed.warningCheckboxChecked = check.ToUInt64() == 1;
+                    if (!observed.warningCheckboxChecked) return;
+                    observed.normalUnsignedWarningEligible = true; observed.normalUnsignedWarningEligibility = "Eligible";
+                    // This branch is unreachable in the default-OFF diagnostic.
+                    // Its marker must originate only from the outer, explicit
+                    // human-approved one-run workflow. No security policy,
+                    // zone marker or checkbox is changed by this handler.
+                    if (!warningConsentValidated || Interlocked.CompareExchange(ref warningRunAttempt, 0, 0) != 0) return;
+                    uint runOwner; uint runThread = GetWindowThreadProcessId(run[0], out runOwner);
+                    UIntPtr finalCheck; string finalRunText;
+                    if (!WarningOwner(window) || runOwner != receipt.fixturePid || runThread != uiThread || GetAncestor(run[0], 2) != window ||
+                        !IsWindowVisible(run[0]) || !IsWindowEnabled(run[0]) || Text(run[0], true) != "Button" ||
+                        !BoundedText(run[0], out finalRunText) || finalRunText.Replace("&", "") != "Run" ||
+                        (GetWindowStyle(run[0], -16).ToInt64() & 15) > 1 || !WarningLaunchContext(expected) ||
+                        AppUpdateService.Hash(lease, CancellationToken.None) != SetupHash ||
+                        SendMessageTimeout(checkbox[0], 0x00f0, UIntPtr.Zero, null, 2, 100, out finalCheck) == IntPtr.Zero || finalCheck.ToUInt64() != check.ToUInt64()) return;
+                    retainedVerified.VerifyForLaunch();
+                    // Re-read only the same selected exact text immediately
+                    // before the one possible send: full path, name+directory,
+                    // the exact name in this verified single-launch context,
+                    // or the same DOS alias physically matching both pinned
+                    // file handles using metadata only.
+                    // Never search again after an identity/text mismatch.
+                    bool freshPath = observed.warningPathBinding == "ExactPath" ? FreshWarningPathText(pathText, window, expected) :
+                        observed.warningPathBinding == "ExactNameAndDirectory" ? FreshWarningPathText(nameText, window, Path.GetFileName(expected)) && FreshWarningPathText(directoryText, window, Path.GetDirectoryName(expected)) :
+                        observed.warningPathBinding == "ExactNameVerifiedLaunchContext" ? FreshWarningPathText(nameText, window, Path.GetFileName(expected)) && WarningLaunchContext(expected) :
+                        observed.warningPathBinding == "ExactFileIdentity" ? FreshWarningPhysicalIdentity(identityText, window, expected, lease) && WarningLaunchContext(expected) :
+                        observed.warningPathBinding == "ExactCompactedVerifiedSuffix" && FreshWarningCompactedSuffix(compactedText, window, expected) && WarningLaunchContext(expected);
+                    if (!freshPath) return;
+                    // Sole new action: the authentic Run control's exposed
+                    // UIA Invoke provider. No mouse, key, window-message,
+                    // activation, desktop switch, checkbox edit or fallback.
+                    if (GetCurrentThreadId() == uiThread || Thread.CurrentThread.GetApartmentState() != ApartmentState.MTA) return;
+                    bool session = WarningInputSession(), desktop = WarningInputDesktop();
+                    if (!session || !desktop || !WarningInputKeysReleased()) return;
+                    var gui = new WarningGuiThreadInformation { Size = (uint)Marshal.SizeOf(typeof(WarningGuiThreadInformation)) };
+                    if (!GetGUIThreadInfo(uiThread, ref gui) || gui.Active != window || GetForegroundWindow() != window ||
+                        gui.Capture != IntPtr.Zero || gui.MenuOwner != IntPtr.Zero || gui.MoveSize != IntPtr.Zero || (gui.Flags & 0x1e) != 0) return;
+                    var ancestorsNow = new WarningObservation(); ObserveWarningRunAncestors(window, run[0], ancestorsNow);
+                    if (!ancestorsNow.warningRootEnabled || !ancestorsNow.warningRunAncestorChainKnown || !ancestorsNow.warningRunAncestorChainEnabled) return;
+                    var element = AutomationElement.FromHandle(run[0]); object rawPattern;
+                    if (element == null || element.Current.NativeWindowHandle != run[0].ToInt32() ||
+                        element.Current.ProcessId != receipt.fixturePid || element.Current.ControlType != ControlType.Button ||
+                        element.Current.Name != "Run" || !element.Current.IsEnabled || element.Current.IsOffscreen ||
+                        !element.TryGetCurrentPattern(InvokePattern.Pattern, out rawPattern)) return;
+                    var invoke = rawPattern as InvokePattern; if (invoke == null) return;
+                    warningUiaPatternAvailable = true;
+                    // Recheck native ownership, file and launch descriptor after
+                    // provider discovery. An unsupported or stale provider refuses.
+                    if (!WarningOwner(window) || !WarningLaunchContext(expected) || !IsWindowVisible(run[0]) || !IsWindowEnabled(run[0]) ||
+                        GetAncestor(run[0], 2) != window || !BoundedText(run[0], out finalRunText) || finalRunText.Replace("&", "") != "Run" ||
+                        AppUpdateService.Hash(lease, CancellationToken.None) != SetupHash ||
+                        SendMessageTimeout(checkbox[0], 0x00f0, UIntPtr.Zero, null, 2, 100, out finalCheck) == IntPtr.Zero || finalCheck.ToUInt64() != 1 ||
+                        !WarningInputSession() || !WarningInputDesktop() || !WarningInputKeysReleased() || GetForegroundWindow() != window) return;
+                    retainedVerified.VerifyForLaunch();
+                    if (Interlocked.CompareExchange(ref warningRunAttempt, 1, 0) != 0) return;
+                    warningActionMethod = "UIAInvoke";
+                    warningUiaSessionVerified = warningUiaDesktopVerified = warningUiaOwnerVerified = true;
+                    // Durable CreateNew consumption precedes Invoke. A failed
+                    // write still spends the in-process CAS and cannot retry.
+                    string marker = Path.Combine(Path.GetDirectoryName(receiptPath), "private-warning-uia-attempt.json");
+                    byte[] attempt = new UTF8Encoding(false).GetBytes(json.Serialize(new {
+                        schema = "taskbar-select-private-warning-uia-attempt-v1", sourceSha = Environment.GetEnvironmentVariable("GITHUB_SHA"),
+                        runId = Environment.GetEnvironmentVariable("GITHUB_RUN_ID"), setupSha256 = SetupHash,
+                        fixturePid = receipt.fixturePid, fixtureStartedUtcTicks = receipt.fixtureStartedUtcTicks,
+                        method = "UIAInvoke", oneTime = true }));
+                    using (var consumed = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
+                        consumed.Write(attempt, 0, attempt.Length); consumed.Flush(true);
+                    }
+                    warningUiaMarkerWritten = true;
+                    // Any exception or provider hang is terminal for this one
+                    // attempt. Outer authenticated CI ownership retains cleanup.
+                    if (!FinalUiaFence(window, run[0], checkbox[0], expected, invokeDeadline)) return;
+                    warningUiaFinalFencePassed = true;
+                    warningUiaInvokeAttempted = true;
+                    invoke.Invoke();
+                    warningUiaInvokeReturned = true;
+
+                }
+            } catch (Exception) { observed.normalUnsignedWarningEligibility = "ReadFailed"; }
+            finally {
+                lock (warningGate) {
+                    // Retain the strongest read-only observation after this
+                    // transient warning disappears and the installer starts.
+                    if (!warningObservation.normalUnsignedWarningEligible || observed.normalUnsignedWarningEligible) warningObservation = observed;
+                }
+            }
+        }
+        sealed class WatchReceipt : WarningObservation
+        {
+            public string schema = "taskbar-select-private-update-watchdog-v1";
+            public uint fixturePid;
+            public long fixtureStartedUtcTicks;
+            public int sample, stage, timerTicks, installDialogCount, securityDialogCount, unknownDialogCount, unresponsiveDialogCount;
+            public bool afterYesClickReturned, stage5Launching, stage5ActiveLaunch, dialogEnumerationTruncated;
+            public string launchExceptionType = "None";
+            public int launchExceptionHresult, launchNativeError, launchExceptionCount;
+        }
+        static void Watchdog()
+        {
+            int sample = 0;
+            while (!watchdogStop.WaitOne(1000)) {
+                try {
+                    var value = new WatchReceipt { fixturePid = receipt.fixturePid, fixtureStartedUtcTicks = receipt.fixtureStartedUtcTicks,
+                        sample = ++sample, stage = Interlocked.CompareExchange(ref stage, 0, 0), timerTicks = Interlocked.CompareExchange(ref timerTicks, 0, 0),
+                        afterYesClickReturned = afterYesClickReturned, stage5Launching = Launching(), stage5ActiveLaunch = ActiveLaunch() != null };
+                    lock (exceptionGate) {
+                        value.launchExceptionType = launchExceptionType; value.launchExceptionHresult = launchExceptionHresult;
+                        value.launchNativeError = launchNativeError; value.launchExceptionCount = launchExceptionCount;
+                    }
+                    int seen = 0;
+                    EnumThreadWindows(uiThread, delegate(IntPtr window, IntPtr state) {
+                        if (watchdogStop.WaitOne(0)) return false;
+                        uint owner; GetWindowThreadProcessId(window, out owner);
+                        if (owner != value.fixturePid || !IsWindowVisible(window) || Text(window, true) != "#32770") return true;
+                        if (++seen > 8) { value.dialogEnumerationTruncated = true; return false; }
+                        var title = new StringBuilder(256); UIntPtr result;
+                        if (SendMessageTimeout(window, 0x000d, new UIntPtr((uint)title.Capacity), title, 2, 500, out result) == IntPtr.Zero || result.ToUInt64() >= 255) value.unresponsiveDialogCount++;
+                        else if (title.ToString() == "Install update") value.installDialogCount++;
+                        else if (title.ToString() == "Open File - Security Warning") { value.securityDialogCount++; ProbeNormalWarning(window); }
+                        else value.unknownDialogCount++;
+                        return true;
+                    }, IntPtr.Zero);
+                    CopyWarning(value);
+                    string serialized = new JavaScriptSerializer().Serialize(value); Require(serialized.Length < 8192);
+                    string temporary = watchdogPath + ".next"; Require(!File.Exists(temporary));
+                    using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
+                        byte[] bytes = new UTF8Encoding(false).GetBytes(serialized); file.Write(bytes, 0, bytes.Length); file.Flush(true);
+                    }
+                    if (File.Exists(watchdogPath)) File.Replace(temporary, watchdogPath, null); else File.Move(temporary, watchdogPath);
+                } catch (Exception) {
+                    // Observation is optional and cannot change app state,
+                    // dismiss an unknown dialog or turn a failure into a pass.
+                    return;
+                }
+            }
+        }
+        static void Write(string phase)
+        {
+            receipt.phase = phase;
+            if (receiptPath == null) return;
+            CopyWarning(receipt);
+            string temporary = receiptPath + ".next";
+            Require(!File.Exists(temporary));
+            string value = json.Serialize(receipt); Require(value.Length < 16384);
+            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
+                byte[] bytes = new UTF8Encoding(false).GetBytes(value); file.Write(bytes, 0, bytes.Length); file.Flush(true);
+            }
+            if (File.Exists(receiptPath)) File.Replace(temporary, receiptPath, null); else File.Move(temporary, receiptPath);
+        }
+        static void Require(bool value) { if (!value) throw new InvalidOperationException("Private updater fixture admission or assertion failed."); }
+        static bool Same(string a, string b) { return String.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }
+        static string BoundedPath(string root, string value)
+        {
+            string path = Path.GetFullPath(value);
+            Require(Path.IsPathRooted(value) && path.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)); return path;
+        }
+        static void OrdinaryPath(string value)
+        {
+            for (string path = Path.GetFullPath(value); path != null; path = Path.GetDirectoryName(path.TrimEnd('\\')))
+                Require((File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0);
+        }
+        static string Hash(string path)
+        {
+            OrdinaryPath(path);
+            using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) return AppUpdateService.Hash(file, CancellationToken.None);
+        }
+        sealed class PinnedTransport : IAppUpdateTransport, IDisposable
+        {
+            readonly FileStream setup, sums;
+            readonly byte[] feed;
+            internal int ReadEvents;
+            internal PinnedTransport(string assets)
+            {
+                string setupPath = Path.Combine(assets, AppUpdatePolicy.InstallerName(Target));
+                string sumsPath = Path.Combine(assets, "SHA256SUMS.txt"); OrdinaryPath(setupPath); OrdinaryPath(sumsPath);
+                setup = new FileStream(setupPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                sums = new FileStream(sumsPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                Require(AppUpdateService.Hash(setup, CancellationToken.None) == SetupHash && AppUpdateService.Hash(sums, CancellationToken.None) == SumsHash);
+                var assetsInfo = new[] {
+                    new { name = AppUpdatePolicy.InstallerName(Target), state = "uploaded", size = setup.Length, browser_download_url = AppUpdatePolicy.AssetUri(Target, AppUpdatePolicy.InstallerName(Target)).AbsoluteUri, digest = "sha256:" + SetupHash },
+                    new { name = "SHA256SUMS.txt", state = "uploaded", size = sums.Length, browser_download_url = AppUpdatePolicy.AssetUri(Target, "SHA256SUMS.txt").AbsoluteUri, digest = "sha256:" + SumsHash }
+                };
+                feed = Encoding.UTF8.GetBytes(json.Serialize(new[] { new {
+                    tag_name = "v" + Target, draft = false, prerelease = true,
+                    html_url = AppUpdatePolicy.Repository + "/releases/tag/v" + Target,
+                    body = "Private acceptance fixture: exact hosted beta.18 package. No public release was created.", assets = assetsInfo
+                } }));
+            }
+            public AppUpdateResponse Open(Uri address, CancellationToken cancellation)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                Require(AppUpdatePolicy.InitialUri(address));
+                if (AppUpdatePolicy.SameUri(address, new Uri(AppUpdatePolicy.Feed))) return new AppUpdateResponse(new MemoryStream(feed, false), feed.Length, null);
+                FileStream file = AppUpdatePolicy.SameUri(address, AppUpdatePolicy.AssetUri(Target, "SHA256SUMS.txt")) ? sums :
+                    AppUpdatePolicy.SameUri(address, AppUpdatePolicy.AssetUri(Target, AppUpdatePolicy.InstallerName(Target))) ? setup : null;
+                Require(file != null); file.Position = 0;
+                return new AppUpdateResponse(new PinnedReadStream(file, cancellation, delegate { Interlocked.Increment(ref ReadEvents); }), file.Length, null);
+            }
+            public void Dispose() { if (setup != null) setup.Dispose(); if (sums != null) sums.Dispose(); }
+        }
+        sealed class PinnedReadStream : Stream
+        {
+            readonly Stream stream; readonly CancellationToken cancellation; readonly Action progress;
+            internal PinnedReadStream(Stream source, CancellationToken token, Action report) { stream = source; cancellation = token; progress = report; }
+            public override bool CanRead { get { return true; } } public override bool CanSeek { get { return false; } } public override bool CanWrite { get { return false; } }
+            public override long Length { get { return stream.Length; } } public override long Position { get { return stream.Position; } set { throw new NotSupportedException(); } }
+            public override int Read(byte[] buffer, int offset, int count) { cancellation.ThrowIfCancellationRequested(); Thread.Sleep(8); int read = stream.Read(buffer, offset, Math.Min(count, 32768)); if (read > 0) progress(); return read; }
+            public override void Flush() { } public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+            public override void SetLength(long value) { throw new NotSupportedException(); } public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+            // The transport owns immutable source-file leases across requests.
+            protected override void Dispose(bool disposing) { base.Dispose(disposing); }
+        }
+    }
+}
