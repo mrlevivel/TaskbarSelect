@@ -5,6 +5,23 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      private_updater:
+        description: 'Dedicated private updater diagnostic; original windows job is skipped only in this mode'
+        type: boolean
+        default: false
+      updater_spec:
+        description: 'Reviewed donor JSON: run/artifact/head/compiled/archive digest and app/Setup/checksum SHA256'
+        type: string
+        default: ''
+      execute_trial:
+        description: 'DEFAULT OFF. Run disposable-account updater/warning observation; otherwise prepare/compile only'
+        type: boolean
+        default: false
+      approve_run:
+        description: 'DEFAULT OFF. Fresh explicit approval for one authentic ordinary Open File Run UIA Invoke; no fallback/UAC/SmartScreen'
+        type: boolean
+        default: false
 
 # PR updates need one current run. Explicit manual diagnostics keep separate
 # groups, so they cannot cancel a normal build or another manual request.
@@ -17,7 +34,68 @@ permissions:
   actions: read
 
 jobs:
+  refuse-invalid-private-updater:
+    if: github.event_name == 'workflow_dispatch' && inputs.private_updater == true && !(github.event.repository.private == true && github.repository == 'mrlevivel/TaskbarSelect' && github.ref == 'refs/heads/codex/beta17-private-updater')
+    runs-on: windows-latest
+    timeout-minutes: 1
+    steps:
+      - name: Reject invalid exclusive private updater mode
+        shell: powershell
+        run: throw 'Private updater requires its exact private repository, diagnostic branch and exclusive manual mode.'
+  private-updater:
+    if: github.event_name == 'workflow_dispatch' && inputs.private_updater == true && github.event.repository.private == true && github.repository == 'mrlevivel/TaskbarSelect' && github.ref == 'refs/heads/codex/beta17-private-updater'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Read bounded actual event donor reference
+        id: spec
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((Get-Item -LiteralPath $env:GITHUB_EVENT_PATH).Length -gt 2097152){throw 'Event exceeds bound.'}
+          $event=Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw|ConvertFrom-Json
+          $text=$event.inputs.updater_spec
+          if($text -isnot [string] -or $text.Length -gt 4096){throw 'Bounded donor spec required.'}
+          $spec=$text|ConvertFrom-Json
+          if($spec.donor_compiled_sha -isnot [string] -or $spec.donor_compiled_sha -cnotmatch '^[a-f0-9]{40}$'){throw 'Full donor commit required.'}
+          ('donor_compiled_sha='+$spec.donor_compiled_sha)|Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding ascii -Append
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.spec.outputs.donor_compiled_sha }}
+          path: donor-source
+          persist-credentials: false
+      - name: Admit successful exact donor and compile labelled private predecessor only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: .\.github\scripts\private-updater-prepare.ps1
+      - name: Execute only explicitly requested disposable private trial
+        if: inputs.execute_trial == true
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & (Join-Path $PWD 'artifacts\private-updater-input\private-updater-ci.ps1')
+      - name: Default preparation has no runtime acceptance claim
+        if: inputs.execute_trial != true
+        shell: powershell
+        run: Write-Output 'PREPARED ONLY; no app/Setup/account/security action executed, no updater pass claimed.'
+      - name: Retain bounded private provenance and receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: Taskbar-Select-PRIVATE-BETA17-UPDATER-qualification
+          retention-days: 14
+          if-no-files-found: ignore
+          path: |
+            artifacts/private-updater-provenance.json
+            artifacts/private-updater-ci/runner.json
+            artifacts/private-updater-ci/result.json
+            artifacts/private-updater-ci/private-updater-result.json
   windows:
+    if: inputs.private_updater != true
     name: windows
     runs-on: windows-latest
     timeout-minutes: 25

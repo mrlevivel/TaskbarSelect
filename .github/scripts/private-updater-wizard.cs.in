@@ -1,0 +1,323 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Management;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Web.Script.Serialization;
+using Microsoft.Win32;
+
+// Disposable hosted CI only. This does not send global mouse/keyboard input.
+// Only positively owned Inno wizard buttons receive BM_CLICK. No UAC,
+// SmartScreen, credential, security-warning or unknown dialog is accepted.
+internal static class SetupWizardSupervisor
+{
+    const string SetupHash = "@TARGET_SETUP_SHA256@";
+    const uint Click = 0x00f5;
+    static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
+    static readonly List<Owned> Children = new List<Owned>();
+    static readonly List<string> Pages = new List<string>();
+    static string phase = "admission";
+    static int clicks,unknownWindowObservations;
+    static Stopwatch wizardClock;
+    static int checkpoint,readyPathControlCount;
+    static string observedPage="None";
+    static bool readyDestinationVerified,readyDestinationFromControl,readyDestinationFromRegistration,destinationPageObserved;
+    static IntPtr retainedPathControl;
+    // Checkpoint map: 1 admission,2 pin Setup,3 discovery,4 owned windows,
+    // 5 framework,6 wizard owner,7 controls,8 page,9 destination controls,
+    // 10 ready controls,11 ready registry,12 ready policy,13 button,
+    // 14 owner/caption,15 fresh windows,16 fresh target,17 post,
+    // 18 no-action install wait,19 completion,20 Setup exit,21 unknown page.
+    sealed class WindowTextUnavailableException : Exception { }
+    delegate bool EnumProc(IntPtr window, IntPtr state);
+    [StructLayout(LayoutKind.Sequential)] struct Rect { internal int Left,Top,Right,Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct GuiThreadInfo { internal uint Size,Flags; internal IntPtr Active,Focus,Capture,MenuOwner,MoveSize,Caret; internal Rect CaretRect; }
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr state);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr window, EnumProc callback, IntPtr state);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr window);
+    [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr window);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int count);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window,out Rect rectangle);
+    [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread,ref GuiThreadInfo information);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window,uint command);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window,uint flags);
+    [DllImport("kernel32.dll")] static extern void SetLastError(uint error);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wparam, StringBuilder lparam, uint flags, uint timeout, out UIntPtr result);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool PostMessage(IntPtr window, uint message, UIntPtr wparam, IntPtr lparam);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder path, ref uint size);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr value, int size, out int returned);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    static void Require(bool condition) { if (!condition) throw new InvalidOperationException("Private owned wizard predicate failed."); }
+    static uint ReadTimeout() { long remaining=60000-(wizardClock==null?0:wizardClock.ElapsedMilliseconds);Require(remaining>0);return (uint)Math.Min(500,remaining); }
+    static string Hash(Stream stream) { stream.Position=0; using(var sha=SHA256.Create()) { string hash=BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant(); stream.Position=0; return hash; } }
+    static string Text(IntPtr window) {
+        UIntPtr length;if(SendMessageTimeout(window,0x000e,UIntPtr.Zero,null,2,ReadTimeout(),out length)==IntPtr.Zero)throw new WindowTextUnavailableException();Require(length.ToUInt64()<4096);
+        var b=new StringBuilder(4096); UIntPtr result;if(SendMessageTimeout(window,0x000d,new UIntPtr((uint)b.Capacity),b,2,ReadTimeout(),out result)==IntPtr.Zero)throw new WindowTextUnavailableException();Require(result.ToUInt64()<4096); return b.ToString();
+    }
+    static string Class(IntPtr window) { var b=new StringBuilder(256); GetClassName(window,b,b.Capacity); return b.ToString(); }
+    internal sealed class FrameworkFacts {
+        internal bool PinnedTmpChild,ProcessVerified,CandidateVisible,CandidateEnabled,WizardVisible,WizardEnabled,TimedReadSucceeded,CachedReadSucceeded,ChildEnumerationComplete,ActiveStateKnown,ForegroundKnown;
+        internal int OwnerPid,CandidatePid,WizardPid,WizardCount,FrameworkCount,ChildCount;
+        internal uint CandidateThread,WizardThread;
+        internal long ExpectedEpoch,ActualEpoch,Width,Height,WizardWidth,WizardHeight;
+        internal string CandidateClass,WizardClass,WizardTitle,TimedCaption,CachedCaption;
+        internal bool IsActive,IsForeground;
+    }
+    internal static bool IsKnownInertFramework(FrameworkFacts f) {
+        return f!=null && f.PinnedTmpChild && f.ProcessVerified && f.ExpectedEpoch>0 && f.ExpectedEpoch==f.ActualEpoch &&
+            f.OwnerPid>0 && f.CandidatePid==f.OwnerPid && f.WizardPid==f.OwnerPid && f.CandidateThread!=0 && f.CandidateThread==f.WizardThread &&
+            f.WizardCount==1 && f.FrameworkCount==1 && f.CandidateVisible && f.CandidateEnabled && f.CandidateClass=="TApplication" && f.WizardClass=="TWizardForm" &&
+            f.WizardTitle!=null && f.WizardTitle.StartsWith("Setup - Taskbar Select",StringComparison.Ordinal) &&
+            f.WizardVisible && f.WizardEnabled && f.WizardWidth>0 && f.WizardHeight>0 &&
+            f.TimedReadSucceeded && f.CachedReadSucceeded && f.TimedCaption=="" && f.CachedCaption=="" &&
+            f.Width==0 && f.Height==0 && f.ChildEnumerationComplete && f.ChildCount==0 &&
+            f.ActiveStateKnown && !f.IsActive && f.ForegroundKnown && !f.IsForeground;
+    }
+    internal static bool IsExpectedButtonCaption(string expected,string actual) {
+        if(actual==null)return false;
+        // One leading English accelerator marker is permitted, with no
+        // whitespace, arbitrary ampersand removal or caption prefix matching.
+        string caption=actual.StartsWith("&",StringComparison.Ordinal)?actual.Substring(1):actual;
+        if(expected=="Next")return caption=="Next" || caption=="Next >";
+        return (expected=="Install" || expected=="Finish") && caption==expected;
+    }
+    internal sealed class DestinationFacts {
+        internal bool KnownSetupPolicy,EmptyArguments,EnumerationComplete,Contradiction,ControlMatches,PreviouslyRetainedControlMissing,DestinationPageObserved;
+        internal bool RegistrationReadSucceeded,RegistrationVersion16,RegistrationAppPathMatches,RegistrationInstallLocationMatches;
+        internal int ControlCount;
+    }
+    internal static bool IsOwnedDestination(DestinationFacts facts) {
+        if(facts==null || !facts.KnownSetupPolicy || !facts.EmptyArguments || !facts.EnumerationComplete || facts.Contradiction || facts.PreviouslyRetainedControlMissing)return false;
+        if(facts.ControlCount==1)return facts.ControlMatches;
+        return facts.ControlCount==0 && !facts.DestinationPageObserved && facts.RegistrationReadSucceeded && facts.RegistrationVersion16 && facts.RegistrationAppPathMatches && facts.RegistrationInstallLocationMatches;
+    }
+    internal static bool DestinationTextMatches(string expected,string actual) {
+        try { return String.Equals(FullPath(expected),FullPath(actual),StringComparison.OrdinalIgnoreCase); }
+        catch(ArgumentException){return false;}catch(NotSupportedException){return false;}catch(PathTooLongException){return false;}catch(InvalidOperationException){return false;}
+    }
+    static bool PathLike(string text) { return !String.IsNullOrEmpty(text) && ((text.Length>=2 && ((text[0]>='A'&&text[0]<='Z')||(text[0]>='a'&&text[0]<='z')) && text[1]==':') || text.StartsWith("\\",StringComparison.Ordinal) || text.StartsWith("/",StringComparison.Ordinal)); }
+    static void VerifyReadyDestination(Owned owner,IntPtr wizard,string install,IEnumerable<string> visibleTexts) {
+        checkpoint=10;readyDestinationVerified=false;readyDestinationFromControl=false;readyDestinationFromRegistration=false;readyPathControlCount=0;
+        owner.Verify();uint wizardPid;uint wizardThread=GetWindowThreadProcessId(wizard,out wizardPid);Require(wizardThread!=0 && wizardPid==owner.Process.Id && Class(wizard)=="TWizardForm");
+        var facts=new DestinationFacts {KnownSetupPolicy=true,EmptyArguments=true,EnumerationComplete=true,DestinationPageObserved=destinationPageObserved};
+        foreach(string text in visibleTexts)foreach(string line in text.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries)){string candidate=line.Trim();if(PathLike(candidate)&&!DestinationTextMatches(install,candidate))facts.Contradiction=true;}
+        // InitializeFont creates parent/page handles, not necessarily leaf
+        // edits (is-6_7_3 Setup.SetupForm.pas ParentHandlesNeeded). Inspect all
+        // existing native edits including hidden ones; never create a handle.
+        var paths=new List<IntPtr>();int total=0;
+        EnumChildWindows(wizard,delegate(IntPtr control,IntPtr state){
+            if(++total>256){facts.EnumerationComplete=false;return false;}
+            uint pid;uint thread=GetWindowThreadProcessId(control,out pid);Require(thread==wizardThread && pid==wizardPid && GetAncestor(control,2)==wizard);
+            string cls=Class(control);if(cls!="TNewPathEdit" && cls!="TNewEdit" && cls!="Edit")return true;
+            string text=Text(control);if(cls!="TNewPathEdit" && !PathLike(text))return true;
+            paths.Add(control);if(paths.Count>8){facts.EnumerationComplete=false;return false;}
+            if(!DestinationTextMatches(install,text))facts.Contradiction=true;
+            uint fresh;Require(GetWindowThreadProcessId(control,out fresh)==wizardThread&&fresh==wizardPid&&Class(control)==cls&&GetAncestor(control,2)==wizard);
+            return true;
+        },IntPtr.Zero);
+        uint finalWizardPid;facts.EnumerationComplete=facts.EnumerationComplete && total>0 && IsWindow(wizard) && GetWindowThreadProcessId(wizard,out finalWizardPid)==wizardThread && finalWizardPid==wizardPid;
+        facts.ControlCount=paths.Count;readyPathControlCount=Math.Min(paths.Count,8);
+        facts.PreviouslyRetainedControlMissing=retainedPathControl!=IntPtr.Zero && (paths.Count!=1 || paths[0]!=retainedPathControl);
+        facts.ControlMatches=paths.Count==1 && !facts.Contradiction;
+        if(paths.Count==0 && !facts.PreviouslyRetainedControlMissing) {
+            checkpoint=11;
+            // Exact unchanged Setup has UsePreviousAppDir=yes, empty launch
+            // arguments and no script changing DirEdit. Its prior directory
+            // comes from this same-AppId HKCU64 Inno field. InstallLocation and
+            // beta.13 corroborate the actual disposable baseline registration.
+            const string keyName="Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{A446A470-529B-42E0-AD2D-D24B31864DFC}_is1";
+            using(var hive=RegistryKey.OpenBaseKey(RegistryHive.CurrentUser,RegistryView.Registry64))
+            using(var key=hive.OpenSubKey(keyName,false)) {
+                if(key!=null && key.GetValueKind("Inno Setup: App Path")==RegistryValueKind.String && key.GetValueKind("InstallLocation")==RegistryValueKind.String && key.GetValueKind("DisplayVersion")==RegistryValueKind.String) {
+                    facts.RegistrationReadSucceeded=true;
+                    facts.RegistrationVersion16=key.GetValue("DisplayVersion",null,RegistryValueOptions.DoNotExpandEnvironmentNames) as string=="1.0.0-beta.16";
+                    facts.RegistrationAppPathMatches=DestinationTextMatches(install,key.GetValue("Inno Setup: App Path",null,RegistryValueOptions.DoNotExpandEnvironmentNames) as string);
+                    facts.RegistrationInstallLocationMatches=DestinationTextMatches(install,key.GetValue("InstallLocation",null,RegistryValueOptions.DoNotExpandEnvironmentNames) as string);
+                }
+            }
+        }
+        checkpoint=12;Require(IsOwnedDestination(facts));
+        if(paths.Count==1){retainedPathControl=paths[0];readyDestinationFromControl=true;}else readyDestinationFromRegistration=true;
+        readyDestinationVerified=true;
+    }
+    static string FullPath(string value) { Require(!String.IsNullOrEmpty(value) && Path.IsPathRooted(value) && value.Length>3 && value[1]==':' && value[2]=='\\'); return Path.GetFullPath(value).TrimEnd('\\'); }
+    static void OrdinaryAncestors(string path) { for(string p=path; p!=null; p=Path.GetDirectoryName(p.TrimEnd('\\'))) { Require((File.GetAttributes(p)&FileAttributes.ReparsePoint)==0); if(p.Length==3)break; } }
+    static bool Within(string path,string root) { return path.StartsWith(root+"\\",StringComparison.OrdinalIgnoreCase); }
+    static int Scalar(IntPtr token,int kind) { IntPtr p=Marshal.AllocHGlobal(4); try { int n; Require(GetTokenInformation(token,kind,p,4,out n)&&n==4); return Marshal.ReadInt32(p); } finally { Marshal.FreeHGlobal(p); } }
+    static void Medium(Process process) { IntPtr token; Require(OpenProcessToken(process.Handle,8,out token)); try { Require(Scalar(token,20)==0); int n; GetTokenInformation(token,25,IntPtr.Zero,0,out n); Require(n>IntPtr.Size && n<4096); IntPtr p=Marshal.AllocHGlobal(n); try { Require(GetTokenInformation(token,25,p,n,out n)); var sid=new System.Security.Principal.SecurityIdentifier(Marshal.ReadIntPtr(p)); Require(sid.Value.EndsWith("-8192",StringComparison.Ordinal)); } finally { Marshal.FreeHGlobal(p); } } finally { CloseHandle(token); } }
+    sealed class Owned : IDisposable
+    {
+        internal Process Process; internal long Started; internal string Path,HashValue; internal FileStream Image;
+        internal Owned(int id,long started,string expectedPath,string expectedHash) {
+            Process=Process.GetProcessById(id); Started=started; Require(Process.StartTime.ToUniversalTime().Ticks==Started && !Process.HasExited);
+            var b=new StringBuilder(32768); uint n=(uint)b.Capacity; Require(QueryFullProcessImageName(Process.Handle,0,b,ref n)); Path=FullPath(b.ToString());
+            Require(String.Equals(Path,FullPath(expectedPath),StringComparison.OrdinalIgnoreCase)); OrdinaryAncestors(Path); Medium(Process);
+            Image=new FileStream(Path,FileMode.Open,FileAccess.Read,FileShare.Read); HashValue=Hash(Image); Require(expectedHash==null || HashValue==expectedHash); Verify();
+        }
+        internal void Verify() { Require(!Process.HasExited && Process.StartTime.ToUniversalTime().Ticks==Started); var b=new StringBuilder(32768); uint n=(uint)b.Capacity; Require(QueryFullProcessImageName(Process.Handle,0,b,ref n) && String.Equals(Path,b.ToString(),StringComparison.OrdinalIgnoreCase)); Require(Hash(Image)==HashValue); }
+        public void Dispose() { if(Image!=null)Image.Dispose(); if(Process!=null)Process.Dispose(); }
+    }
+    static List<IntPtr> Windows(int process) { var result=new List<IntPtr>(); EnumWindows(delegate(IntPtr w,IntPtr s) { uint id; GetWindowThreadProcessId(w,out id); if(id==process && IsWindowVisible(w))result.Add(w); return true; },IntPtr.Zero); return result; }
+    static List<IntPtr> Controls(IntPtr window) { var result=new List<IntPtr>(); uint owner; Require(GetWindowThreadProcessId(window,out owner)!=0); EnumChildWindows(window,delegate(IntPtr w,IntPtr s) { if(IsWindowVisible(w)){uint child;Require(GetWindowThreadProcessId(w,out child)!=0 && child==owner);result.Add(w);} return true; },IntPtr.Zero); return result; }
+    static bool InertFramework(Owned root,Owned owner,IntPtr candidate,Tuple<Owned,IntPtr> wizard,int wizardCount,int frameworkCount) {
+        checkpoint=5;
+        // This exemption belongs only to a retained, authenticated extracted
+        // Inno child. A bootstrap or an arbitrary same-name window is ineligible.
+        if(owner==root || !Children.Contains(owner) || !owner.Path.EndsWith(".tmp",StringComparison.OrdinalIgnoreCase) || Class(candidate)!="TApplication")return false;
+        owner.Verify();Medium(owner.Process);
+        var facts=new FrameworkFacts {PinnedTmpChild=true,ProcessVerified=true,OwnerPid=owner.Process.Id,ExpectedEpoch=owner.Started,ActualEpoch=owner.Process.StartTime.ToUniversalTime().Ticks,WizardCount=wizardCount,FrameworkCount=frameworkCount};
+        uint pid;facts.CandidateThread=GetWindowThreadProcessId(candidate,out pid);facts.CandidatePid=(int)pid;facts.CandidateClass=Class(candidate);
+        facts.WizardThread=GetWindowThreadProcessId(wizard.Item2,out pid);facts.WizardPid=(int)pid;facts.WizardClass=Class(wizard.Item2);facts.WizardTitle=Text(wizard.Item2);
+        facts.CandidateVisible=IsWindowVisible(candidate);facts.CandidateEnabled=IsWindowEnabled(candidate);facts.WizardVisible=IsWindowVisible(wizard.Item2);facts.WizardEnabled=IsWindowEnabled(wizard.Item2);
+        Rect rectangle;if(!GetWindowRect(candidate,out rectangle))return false;facts.Width=(long)rectangle.Right-rectangle.Left;facts.Height=(long)rectangle.Bottom-rectangle.Top;
+        if(!GetWindowRect(wizard.Item2,out rectangle))return false;facts.WizardWidth=(long)rectangle.Right-rectangle.Left;facts.WizardHeight=(long)rectangle.Bottom-rectangle.Top;
+        UIntPtr copied;var timed=new StringBuilder(2);
+        facts.TimedReadSucceeded=SendMessageTimeout(candidate,0x000d,new UIntPtr((uint)timed.Capacity),timed,2,ReadTimeout(),out copied)!=IntPtr.Zero && copied.ToUInt64()==0;
+        facts.TimedCaption=timed.ToString();var cached=new StringBuilder(2);SetLastError(0);
+        int count=GetWindowText(candidate,cached,cached.Capacity);int error=Marshal.GetLastWin32Error();facts.CachedReadSucceeded=count==0 && error==0;facts.CachedCaption=cached.ToString();
+        // Test ALL children, including hidden controls. EnumChildWindows has
+        // no useful completion return value, so also query the direct child
+        // relation before and after the bounded no-child enumeration.
+        bool directChild=GetWindow(candidate,5)!=IntPtr.Zero;
+        int children=0;EnumChildWindows(candidate,delegate(IntPtr w,IntPtr s){children++;return false;},IntPtr.Zero);
+        facts.ChildCount=children;facts.ChildEnumerationComplete=!directChild && GetWindow(candidate,5)==IntPtr.Zero && children==0;
+        var gui=new GuiThreadInfo {Size=(uint)Marshal.SizeOf(typeof(GuiThreadInfo))};facts.ActiveStateKnown=GetGUIThreadInfo(facts.CandidateThread,ref gui);facts.IsActive=gui.Active==candidate;
+        IntPtr foreground=GetForegroundWindow();facts.ForegroundKnown=foreground!=IntPtr.Zero;facts.IsForeground=foreground==candidate;
+        // Recheck native HWND identity after the observations. A destroyed or
+        // recycled HWND never inherits the retained process's authority.
+        uint fresh;Require(GetWindowThreadProcessId(candidate,out fresh)==facts.CandidateThread && fresh==(uint)facts.CandidatePid);
+        Require(GetWindowThreadProcessId(wizard.Item2,out fresh)==facts.WizardThread && fresh==(uint)facts.WizardPid);
+        Require(IsWindow(candidate) && Class(candidate)==facts.CandidateClass && GetWindowRect(candidate,out rectangle));
+        if((long)rectangle.Right-rectangle.Left!=facts.Width || (long)rectangle.Bottom-rectangle.Top!=facts.Height || GetWindow(candidate,5)!=IntPtr.Zero || !IsWindowEnabled(candidate))return false;
+        return IsKnownInertFramework(facts);
+    }
+    static List<Tuple<Owned,IntPtr>> EligibleWizards(Owned root) {
+        checkpoint=4;
+        var all=new List<Tuple<Owned,IntPtr>>();var recognized=new List<Tuple<Owned,IntPtr>>();
+        foreach(var owner in new[]{root}.Concat(Children)) {
+            if(owner.Process.HasExited)continue;owner.Verify();var windows=Windows(owner.Process.Id);Require(windows.Count<=8);
+            foreach(var window in windows){var entry=Tuple.Create(owner,window);all.Add(entry);if(Class(window)=="TWizardForm" && Text(window).StartsWith("Setup - Taskbar Select",StringComparison.Ordinal))recognized.Add(entry);}
+        }
+        int frameworks=all.Count(e=>Class(e.Item2)=="TApplication");bool unknown=false;
+        foreach(var entry in all) {
+            if(recognized.Any(e=>e.Item1==entry.Item1 && e.Item2==entry.Item2))continue;
+            if(recognized.Count==1 && frameworks==1 && InertFramework(root,entry.Item1,entry.Item2,recognized[0],recognized.Count,frameworks))continue;
+            unknown=true;unknownWindowObservations++;
+        }
+        // Only the one positively recognized wizard can receive actions. Any
+        // unknown/modal/disabled/positive-size auxiliary window keeps blocking.
+        if(unknown)return new List<Tuple<Owned,IntPtr>>();Require(recognized.Count<=1);
+        if(recognized.Count==1 && !IsWindowEnabled(recognized[0].Item2))return new List<Tuple<Owned,IntPtr>>();
+        return recognized;
+    }
+    static void Discover(Owned root,string temp) {
+        var parents=new Dictionary<int,Owned> {{root.Process.Id,root}}; foreach(var c in Children)parents[c.Process.Id]=c;
+        using(var search=new ManagementObjectSearcher("SELECT ProcessId,ParentProcessId,ExecutablePath,CreationDate FROM Win32_Process"))
+        using(var rows=search.Get()) foreach(ManagementObject row in rows) using(row) {
+            int id=Convert.ToInt32(row["ProcessId"],CultureInfo.InvariantCulture), parent=Convert.ToInt32(row["ParentProcessId"],CultureInfo.InvariantCulture);
+            if(parents.ContainsKey(id)||!parents.ContainsKey(parent)||parents[parent].Process.HasExited)continue;
+            string path=row["ExecutablePath"] as string; if(path==null)continue;
+            // Setup's lifecycle executables are not wizard targets. Only its
+            // extracted Inno .tmp can gain a scoped button recipient.
+            if(!path.EndsWith(".tmp",StringComparison.OrdinalIgnoreCase))continue;
+            path=FullPath(path); Require(Children.Count<4 && Within(path,temp));
+            string relative=path.Substring(temp.Length+1); string[] parts=relative.Split('\\');
+            Require(parts.Length==2 && parts[0].StartsWith("is-",StringComparison.OrdinalIgnoreCase) && parts[0].EndsWith(".tmp",StringComparison.OrdinalIgnoreCase));
+            long started=ManagementDateTimeConverter.ToDateTime((string)row["CreationDate"]).ToUniversalTime().Ticks;
+            Require(started>=parents[parent].Started);
+            long nativeStarted;using(var candidate=Process.GetProcessById(id))nativeStarted=candidate.StartTime.ToUniversalTime().Ticks;
+            var child=new Owned(id,nativeStarted,path,null);
+            Require(Math.Abs(child.Started-started)<10000); parents[parent].Verify(); Children.Add(child);
+        }
+    }
+    static void ClickButton(Owned root,Owned owner,IntPtr wizard,string install) {
+        checkpoint=6;
+        owner.Verify(); Require(Class(wizard)=="TWizardForm"); uint pid; Require(GetWindowThreadProcessId(wizard,out pid)!=0 && pid==owner.Process.Id);
+        checkpoint=7;var controls=Controls(wizard); var texts=controls.Select(Text).ToList();
+        string page=null; string button=null;
+        checkpoint=8;
+        if(texts.Any(t=>t.Contains("Completing the Taskbar Select Setup Wizard"))) {page="complete";button="Finish";observedPage=page;}
+        else if(texts.Any(t=>t=="Ready to Install")) {
+            page="ready";button="Install";observedPage=page;
+        }
+        else if(texts.Any(t=>t=="Select Additional Tasks")) {page="tasks";button="Next";observedPage=page;}
+        else if(texts.Any(t=>t=="Select Destination Location")) {
+            page="destination";button="Next";observedPage=page;destinationPageObserved=true;checkpoint=9;
+            // The pinned Inno 6.7.3 TWizardForm declares its directory field
+            // as TNewPathEdit. Keep admission to these exact edit classes.
+            var edits=controls.Where(w=>Class(w)=="TNewPathEdit" || Class(w)=="TNewEdit" || Class(w)=="Edit").Select(Text).Where(t=>t.Length>2 && t[1]==':').ToList();
+            Require(edits.Count==1 && String.Equals(FullPath(edits[0]),install,StringComparison.OrdinalIgnoreCase));
+        }
+        else if(texts.Any(t=>t.Contains("Welcome to the Taskbar Select Setup Wizard"))) {page="welcome";button="Next";observedPage=page;}
+        else {observedPage=texts.Any(t=>t=="Installing" || t=="Preparing to Install")?"installing":"unknown";checkpoint=21;Require(observedPage=="installing");return;}
+        if(Pages.Count>0 && Pages[Pages.Count-1]==page)return;
+        Require(Pages.Count<8 && !Pages.Contains(page));
+        // Preserve the destination evidence attached to an already-posted
+        // Install. A transient old Ready snapshot is a no-action return above,
+        // never a new verification against Setup's changing registration.
+        if(page=="ready")VerifyReadyDestination(owner,wizard,install,texts);
+        checkpoint=13;var buttons=controls.Where(w=>(Class(w)=="TNewButton" || Class(w)=="Button") && IsExpectedButtonCaption(button,Text(w)) && IsWindowEnabled(w)).ToList();
+        Require(buttons.Count==1); uint buttonPid; Require(GetWindowThreadProcessId(buttons[0],out buttonPid)!=0 && buttonPid==owner.Process.Id);
+        // Asynchronous delivery avoids blocking this supervisor while Inno's
+        // Install handler runs its synchronous lifecycle children. Subsequent
+        // observed pages and the pinned Setup exit certify the result.
+        checkpoint=14;owner.Verify();Require(IsExpectedButtonCaption(button,Text(buttons[0])));
+        if(page=="ready")VerifyReadyDestination(owner,wizard,install,Controls(wizard).Select(Text));
+        // Repeat the WHOLE live owned-window inspection after the potentially
+        // slow image/text checks and immediately before the scoped post. An
+        // earlier framework sample or exported diagnostic mask is no authority.
+        checkpoint=15;var fresh=EligibleWizards(root);Require(fresh.Count==1 && fresh[0].Item1==owner && fresh[0].Item2==wizard);
+        checkpoint=16;
+        Require(IsWindowVisible(buttons[0]) && IsWindowEnabled(buttons[0]) && (Class(buttons[0])=="TNewButton" || Class(buttons[0])=="Button") && GetAncestor(buttons[0],2)==wizard && IsExpectedButtonCaption(button,Text(buttons[0])));
+        Require(GetWindowThreadProcessId(buttons[0],out buttonPid)!=0 && buttonPid==owner.Process.Id);
+        Require(wizardClock!=null && wizardClock.ElapsedMilliseconds<60000);
+        // A modal may disable the parent during the final timed caption read.
+        Require(IsWindowEnabled(wizard) && IsWindowEnabled(buttons[0]));
+        checkpoint=17;Require(PostMessage(buttons[0],Click,UIntPtr.Zero,IntPtr.Zero));
+        Pages.Add(page);clicks++;
+    }
+    [STAThread] static int Main(string[] args) {
+        string evidence=null; Owned root=null;
+        try {
+            checkpoint=1;
+            Require(args.Length==4 && Environment.GetEnvironmentVariable("GITHUB_ACTIONS")=="true" && Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT")=="github-hosted" && Environment.GetEnvironmentVariable("RUNNER_OS")=="Windows" && Environment.Is64BitProcess);
+            using(var own=Process.GetCurrentProcess())Medium(own);
+            string runtime=FullPath(Environment.GetEnvironmentVariable("RUNNER_TEMP")); Require(Path.GetFileName(runtime).StartsWith("TaskbarSelectCiRuntime.",StringComparison.Ordinal));
+            string receipt=FullPath(args[0]), install=FullPath(args[1]), temp=FullPath(args[2]); evidence=FullPath(args[3]);
+            Require(Within(receipt,runtime) && Within(install,runtime) && Within(evidence,runtime) && !File.Exists(evidence));
+            OrdinaryAncestors(receipt); OrdinaryAncestors(install); OrdinaryAncestors(temp); Require(new FileInfo(receipt).Length<65536);
+            var r=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(receipt));
+            Require((string)r["schema"]=="taskbar-select-private-update-fixture-v1" && (string)r["status"]=="launched" && (string)r["phase"]=="setup-launch" && (string)r["setupArguments"]=="" && (string)r["setupSha256"]==SetupHash);
+            string setup=FullPath((string)r["setupPath"]); Require(Path.GetFileName(setup)=="TaskbarSelect-1.0.0-beta.17-Setup.exe");
+            phase="pin-setup";checkpoint=2; root=new Owned(Convert.ToInt32(r["setupPid"],CultureInfo.InvariantCulture),Convert.ToInt64(r["setupStartedUtcTicks"],CultureInfo.InvariantCulture),setup,SetupHash);
+            phase="wizard";wizardClock=Stopwatch.StartNew();var clock=wizardClock; bool finished=false;
+            while(clock.ElapsedMilliseconds<60000) {
+                // Inno's loader may remove its extracted child before its own
+                // exit. Keep the image lease only while it can receive clicks.
+                foreach(var child in Children)if(child.Process.HasExited && child.Image!=null){child.Image.Dispose();child.Image=null;}
+                if(root.Process.HasExited) {checkpoint=20;Require(Pages.Contains("complete") && root.Process.ExitCode==0); finished=true;break;}
+                checkpoint=3;root.Verify();Discover(root,temp);
+                try {var observed=EligibleWizards(root);foreach(var entry in observed)ClickButton(root,entry.Item1,entry.Item2,install);}
+                catch(WindowTextUnavailableException){if(!Pages.Contains("ready")||Pages.Contains("complete"))throw;checkpoint=18;observedPage="installing";}
+                Thread.Sleep(100);
+            }
+            checkpoint=19;Require(finished && clicks>=2 && clicks<=6 && Pages.Contains("ready") && Pages.Contains("complete") && readyDestinationVerified);
+            Require(Children.All(c=>c.Process.HasExited));phase="passed";
+            File.WriteAllText(evidence,Json.Serialize(new {schema="taskbar-select-private-update-wizard-v1",status="passed",phase=phase,checkpoint=checkpoint,observedPage=observedPage,readyDestinationVerified=readyDestinationVerified,readyDestinationFromControl=readyDestinationFromControl,readyDestinationFromRegistration=readyDestinationFromRegistration,readyPathControlCount=readyPathControlCount,setupSha256=SetupHash,setupArguments="",shellOpen=true,setupExit=0,deadlineMilliseconds=60000,elapsedMilliseconds=clock.ElapsedMilliseconds,buttons=clicks,pages=Pages.ToArray(),unknownWindowObservations=unknownWindowObservations,childHashes=Children.Select(c=>c.HashValue).ToArray(),globalInput=false,securityDialogsAutomated=false,interactiveUacTested=false}),new UTF8Encoding(false));return 0;
+        } catch(Exception error) {
+            if(evidence!=null && !File.Exists(evidence))try {File.WriteAllText(evidence,Json.Serialize(new{schema="taskbar-select-private-update-wizard-v1",status="failed",phase=phase,checkpoint=checkpoint,observedPage=observedPage,readyDestinationVerified=readyDestinationVerified,readyDestinationFromControl=readyDestinationFromControl,readyDestinationFromRegistration=readyDestinationFromRegistration,readyPathControlCount=readyPathControlCount,errorType=error.GetType().Name,hresult=error.HResult,buttons=clicks,pages=Pages.ToArray(),unknownWindowObservations=unknownWindowObservations,globalInput=false,securityDialogsAutomated=false}),new UTF8Encoding(false));}catch(Exception){}
+            Console.Error.WriteLine("Owned private wizard failed at "+phase+"; "+error.GetType().Name);return 2;
+        } finally {foreach(var child in Children)child.Dispose();if(root!=null)root.Dispose();}
+    }
+}

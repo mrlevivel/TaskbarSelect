@@ -1,0 +1,25 @@
+param([Parameter(Mandatory = $true)][string]$Runtime)
+$ErrorActionPreference = 'Stop'
+if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or
+    -not [Environment]::Is64BitProcess -or $PSVersionTable.PSEdition -cne 'Desktop' -or
+    $env:GITHUB_REF -cne 'refs/heads/codex/beta17-private-updater' -or $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch') {
+    throw 'Only the genuine disposable private updater MED child is admitted.'
+}
+$Runtime = [IO.Path]::GetFullPath($Runtime).TrimEnd('\')
+$inputs = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+if ([IO.Path]::GetFileName($Runtime) -cnotmatch '^TaskbarSelectCiRuntime\.[a-f0-9]{32}$' -or
+    $inputs -cne (Join-Path $Runtime 'private-updater-input') -or -not (Test-Path -LiteralPath $Runtime -PathType Container)) {
+    throw 'Fixed owned updater runtime required.'
+}
+foreach ($path in @($Runtime, $inputs)) {
+    for ($current = $path; $current; $current = [IO.Path]::GetDirectoryName($current.TrimEnd('\'))) {
+        if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse paths are refused.' }
+        if ($current.Length -eq 3) { break }
+    }
+}
+# The sponsor passed only its fixed token-free environment allowlist. Scope all
+# temporary writes to the disposable user's owned runtime, never the real PC.
+$env:RUNNER_TEMP = $Runtime
+$env:TEMP = $Runtime
+$env:TMP = $Runtime
+& (Join-Path $inputs 'private-updater-run.ps1') -Runtime $Runtime -Inputs $inputs
