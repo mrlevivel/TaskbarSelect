@@ -1,10 +1,10 @@
 # Taskbar Select
 
-> **Beta.17 private release candidate for Windows 11 x64.** Verify the supplied archive against its matching checksum before use.
+> **Beta.18 private release candidate for Windows 11 x64.** Verify the supplied archive against its matching checksum before use.
 
 Choose which secondary monitors show the native Windows taskbar, and optionally bring windows to the monitor whose taskbar you use.
 
-This is **1.0.0-beta.17**, with connected-display shortcuts, relative sizing for floating and snapped windows, and maximized-move Undo. Taskbar Select relies on unsupported Explorer behavior that Windows updates can change. Read the bundled `RELEASE_NOTES.md` and `TESTING.md` for the changes and verification scope.
+This is **1.0.0-beta.18**, with the app-search placement fix, connected-display shortcuts, relative sizing for floating and snapped windows, and maximized-move Undo. Taskbar Select relies on unsupported Explorer behavior that Windows updates can change. Read the bundled `RELEASE_NOTES.md` and `TESTING.md` for the changes and verification scope.
 
 **Native snapping limitation:** with experimental snapping Off, Windows+Left/Right and already-maximized windows can retain the former hidden-taskbar strip. Automatic correction of those native layouts remains disabled. The optional session mode below provides separate app-owned halves; native Snap Assist, groups, suggestions and quarter layouts can differ. Taskbar-click moves, explicit layouts and shortcut-minimize Undo retain their own rules.
 
@@ -20,7 +20,7 @@ This is **1.0.0-beta.17**, with connected-display shortcuts, relative sizing for
 First choose **Restore and exit** in any running Taskbar Select copy and confirm recovery succeeded. Open PowerShell in the extracted portable folder and run:
 
 ```powershell
-$testProfile = Join-Path $env:LOCALAPPDATA 'TaskbarSelect-beta17-trial'
+$testProfile = Join-Path $env:LOCALAPPDATA 'TaskbarSelect-beta18-trial'
 Start-Process -FilePath (Join-Path $PWD 'TaskbarSelect.exe') -ArgumentList ('--test-profile "{0}"' -f $testProfile)
 ```
 
@@ -32,13 +32,13 @@ This explicit profile keeps trial preferences separate and disables Startup chan
 
 The shared desktop lock still permits only one taskbar controller. Stop the trial successfully before returning to your installed copy. The portable archive does not contain the maintainer's integration-folder launchers.
 
-Builds are unsigned and SmartScreen may warn. Checksums establish integrity, not publisher identity. Confirm the source before running; if security software blocks it, stop and check with the person providing the build. The beta.17 candidate files are **TaskbarSelect-1.0.0-beta.17-Setup.exe**, **TaskbarSelect-1.0.0-beta.17-portable.zip** and **SHA256SUMS.txt**.
+Builds are unsigned and SmartScreen may warn. Checksums establish integrity, not publisher identity. Confirm the source before running; if security software blocks it, stop and check with the person providing the build. The beta.18 candidate files are **TaskbarSelect-1.0.0-beta.18-Setup.exe**, **TaskbarSelect-1.0.0-beta.18-portable.zip** and **SHA256SUMS.txt**.
 
 Installed and portable copies share your saved choices and Startup entry. Before switching copies, choose **Restore and exit** on the running app and confirm it stopped; closing its settings window is insufficient. Upgrades preserve choices. For a fresh-install trial or uninstall, first copy `%LOCALAPPDATA%\TaskbarSelect\settings.json` and any **Taskbar Select.lnk** from `shell:startup` into a private backup, noting the shortcut target and Windows Startup-app state. Do not delete recovery files. A separate Windows user or test PC gives clean defaults without changing your usual profile.
 
 ## Guided Updates
 
-For migration from any earlier private release, download and run beta 17 Setup manually once. It switches future update checks to this repository.
+While this repository is private, download and run beta 18 Setup manually. Beta 17 already uses this updater address; earlier private beta 16 installations need one manual upgrade to migrate to it.
 
 Open **Settings > Check for updates** to check for a newer official beta or stable release and read its notes. Choose **Download update** for a cancellable download, then **Install update** and explicitly confirm to open Setup. The release checksum and expected installer are verified before launch. Setup preserves preferences and Startup choices. No update check runs at startup or in the background, and nothing installs automatically.
 
@@ -56,7 +56,7 @@ Enable **Bring windows to the taskbar I use** under **All displays** to try move
 
 **Pause moves** leaves taskbar choices active. **Undo** reverses a recent move, layout or minimize performed with Taskbar Select's minimize shortcut. Undoing a maximized move restores the previous display and the window's saved floating size and position. The configurable Undo shortcut defaults to **Ctrl + Shift + Backspace** for new profiles. Existing saved choices, including Ctrl + Alt + Backspace or Off, are preserved.
 
-**Shortcuts > Window movement** lists connected displays and assigns Ctrl+Shift+1–4 to Displays 1–4 by default. Assign a shortcut for any additional display. Saved shortcuts follow Windows display numbers and are kept when a display disconnects. Existing Undo bindings take priority over colliding defaults, and each row reports registration conflicts. **Allow moving fullscreen apps** is off by default and applies to every movement path. Fullscreen requests use full monitor bounds with a bounded observation and safe Undo. Rocket League works in Borderless and refuses monitor moves in exclusive Fullscreen with both Taskbar Select and Windows' monitor shortcut.
+**Shortcuts > Window movement** lists connected displays and assigns Ctrl+Shift+1â€“4 to Displays 1â€“4 by default. Assign a shortcut for any additional display. Saved shortcuts follow Windows display numbers and are kept when a display disconnects. Existing Undo bindings take priority over colliding defaults, and each row reports registration conflicts. **Allow moving fullscreen apps** is off by default and applies to every movement path. Fullscreen requests use full monitor bounds with a bounded observation and safe Undo. Rocket League works in Borderless and refuses monitor moves in exclusive Fullscreen with both Taskbar Select and Windows' monitor shortcut.
 
 An explicitly selected test profile keeps settings and recovery separate, disables Startup changes and production uninstall, and uses separate stop/show events. It still shares the desktop-management lock with regular copies; only one copy may manage taskbars at a time.
 
@@ -123,4 +123,4 @@ For an upgrade or uninstall, run Setup normally. These operations will not reque
 
 The new lifecycle preserves settings and Startup on upgrade, including remembered-support intent. A changed app build needs explicit approval by turning **Administrator support** on in Settings; upgrade never transfers the previous build's approval silently. Successful uninstall requires recovered taskbars and confirmed absence of the saved task and its fixed protected native/ledger files before settings and Startup are deleted. Empty protected parent directories and dormant manual launcher staging may remain.
 
-See the bundled `TESTING.md` for beta.17 qualification and remaining checks. Existing private beta 16 installations need one manual beta 17 installation to migrate to the new updater address.
+See the bundled `TESTING.md` for beta.18 qualification and remaining checks. Existing private beta 16 installations need one manual beta 18 installation to migrate to the new updater address.

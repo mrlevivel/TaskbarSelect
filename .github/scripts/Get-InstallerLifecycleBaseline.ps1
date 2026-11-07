@@ -1,6 +1,33 @@
 $ErrorActionPreference = 'Stop'
 # Download only. This script never runs the app, Setup, or a diagnostic donor.
-function Assert-BaselineArtifactAdmission($Manifest, $Repository, $Run, $Artifact, $RunArtifacts) {
+function Get-BaselineArtifactPolicy([string]$CandidateVersion) {
+    switch -CaseSensitive ($CandidateVersion) {
+        '1.0.0-beta.17' {
+            return [pscustomobject]@{
+                Manifest = 'beta16-baseline-artifact.json'; Workflow = '.github/workflows/seed-upgrade-baseline.yml'
+                Branch = 'codex/beta16-baseline-seed'; Name = 'Taskbar-Select-beta16-upgrade-baseline'
+                Files = @(
+                    [pscustomobject]@{ Name = 'TaskbarSelect-1.0.0-beta.16-Setup.exe'; Length = 3362501; Hash = 'f8bc6de104f18853a91746b156307f797367d3a55110379a9768a30ae5ae413e' },
+                    [pscustomobject]@{ Name = 'SHA256SUMS.txt'; Length = 213; Hash = '82c80f4601e70dd495ffdea1efa0e35d9a9de46a6f77bf2ac0d31987023ef7d7' }
+                )
+            }
+        }
+        '1.0.0-beta.18' {
+            return [pscustomobject]@{
+                Manifest = 'beta17-baseline-artifact.json'; Workflow = '.github/workflows/build.yml'
+                Branch = 'main'; Name = 'Taskbar-Select-beta-package'
+                Files = @(
+                    [pscustomobject]@{ Name = 'TaskbarSelect-1.0.0-beta.17-Setup.exe'; Length = 3329290; Hash = 'e1d35af6c0d9ca9bc16f537b82d12058bbf8cb9ae1180a83f8b1b4a640350a3d' },
+                    [pscustomobject]@{ Name = 'TaskbarSelect-1.0.0-beta.17-portable.zip'; Length = 3326800; Hash = '150d3a7f72f9c6b0b16caf6a7d00b7f7dbb87dedbb284d5cc4b36a134a6769d1' },
+                    [pscustomobject]@{ Name = 'SHA256SUMS.txt'; Length = 213; Hash = 'a9bc425be4ac93d3d5a4f6194a29dd2d64be4fb514898c8914e64a35fa4f50a4' }
+                )
+            }
+        }
+        default { throw 'An explicitly reviewed production baseline artifact policy is required.' }
+    }
+}
+function Assert-BaselineArtifactAdmission([string]$CandidateVersion, $Manifest, $Repository, $Run, $Artifact, $RunArtifacts) {
+    $policy = Get-BaselineArtifactPolicy $CandidateVersion
     $keys = @('schema', 'repositoryId', 'runId', 'artifactId', 'headSha', 'workflowPath', 'artifactName', 'artifactDigest')
     if ($null -eq $Manifest -or @($Manifest.PSObject.Properties).Count -ne $keys.Count -or
         @(Compare-Object ($keys | Sort-Object) (@($Manifest.PSObject.Properties.Name) | Sort-Object) -CaseSensitive).Count -ne 0 -or
@@ -9,17 +36,17 @@ function Assert-BaselineArtifactAdmission($Manifest, $Repository, $Run, $Artifac
         $Manifest.artifactId -isnot [string] -or $Manifest.artifactId -cnotmatch '^[1-9][0-9]{0,19}$' -or
         $Manifest.headSha -isnot [string] -or $Manifest.headSha -cnotmatch '^[a-f0-9]{40}$' -or
         $Manifest.headSha -ceq ('0' * 40) -or
-        $Manifest.workflowPath -cne '.github/workflows/seed-upgrade-baseline.yml' -or
-        $Manifest.artifactName -cne 'Taskbar-Select-beta16-upgrade-baseline' -or
+        $Manifest.workflowPath -cne $policy.Workflow -or
+        $Manifest.artifactName -cne $policy.Name -or
         $Manifest.artifactDigest -isnot [string] -or $Manifest.artifactDigest -cnotmatch '^sha256:[a-f0-9]{64}$') {
-        throw 'An exact reviewed beta16 baseline artifact manifest is required.'
+        throw 'An exact reviewed baseline artifact manifest is required.'
     }
     if ($Repository.id -ne 1449520856 -or $Repository.full_name -cne 'mrlevivel/TaskbarSelect' -or
         $Run.id -ne [long]$Manifest.runId -or $Run.repository.id -ne 1449520856 -or $Run.head_repository.id -ne 1449520856 -or
         $Run.status -cne 'completed' -or $Run.conclusion -cne 'success' -or $Run.event -cne 'push' -or
-        $Run.head_branch -cne 'codex/beta16-baseline-seed' -or $Run.head_sha -cne $Manifest.headSha -or
+        $Run.head_branch -cne $policy.Branch -or $Run.head_sha -cne $Manifest.headSha -or
         $Run.path -cne $Manifest.workflowPath) {
-        throw 'The fixed same-repository baseline seed must have completed successfully.'
+        throw 'The fixed same-repository baseline workflow must have completed successfully.'
     }
     if ($Artifact.id -ne [long]$Manifest.artifactId -or $Artifact.name -cne $Manifest.artifactName -or $Artifact.expired -isnot [bool] -or $Artifact.expired -ne $false -or
         $Artifact.digest -cne $Manifest.artifactDigest -or $Artifact.workflow_run.id -ne $Run.id -or
@@ -28,6 +55,22 @@ function Assert-BaselineArtifactAdmission($Manifest, $Repository, $Run, $Artifac
         @($RunArtifacts.artifacts | Where-Object name -CEQ $Manifest.artifactName).Count -ne 1 -or
         @($RunArtifacts.artifacts | Where-Object id -EQ $Artifact.id).Count -ne 1) {
         throw 'The bounded baseline archive must match its exact reviewed artifact identity and digest.'
+    }
+}
+function Assert-BaselineArchiveContents($Archive, $Files) {
+    if ($Archive.Entries.Count -ne $Files.Count) { throw 'The baseline archive must contain exactly the reviewed root files.' }
+    foreach ($file in $Files) {
+        $entry = @($Archive.Entries | Where-Object FullName -CEQ $file.Name)
+        if ($entry.Count -ne 1 -or $entry[0].Length -ne $file.Length) {
+            throw 'The exact baseline archive entry is missing, duplicated or incorrectly sized.'
+        }
+        $stream = $entry[0].Open()
+        try {
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+            finally { $sha.Dispose() }
+        } finally { $stream.Dispose() }
+        if ($hash -cne $file.Hash) { throw 'A baseline archive entry differs from its reviewed file hash.' }
     }
 }
 function Read-BaselineApi([string]$Endpoint) {
@@ -107,21 +150,22 @@ for ($current = $temp; $current; $current = [IO.Path]::GetDirectoryName($current
 }
 $destination = Join-Path $temp $baseline.Directory
 if (Test-Path -LiteralPath $destination) { throw 'A fresh pinned baseline directory is required.' }
-if ($version -ceq '1.0.0-beta.17') {
+if ($version -cin @('1.0.0-beta.17', '1.0.0-beta.18')) {
     if ($env:GITHUB_REPOSITORY -cne 'mrlevivel/TaskbarSelect') { throw 'The baseline artifact belongs to the exact public-staging repository.' }
-    $manifestPath = Join-Path $PSScriptRoot 'beta16-baseline-artifact.json'
+    $policy = Get-BaselineArtifactPolicy $version
+    $manifestPath = Join-Path $PSScriptRoot $policy.Manifest
     if ((Get-Item -LiteralPath $manifestPath).Length -gt 4096) { throw 'Bounded baseline manifest required.' }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     if ($manifest.runId -isnot [string] -or $manifest.runId -cnotmatch '^[1-9][0-9]{0,19}$' -or
         $manifest.artifactId -isnot [string] -or $manifest.artifactId -cnotmatch '^[1-9][0-9]{0,19}$') {
-        throw 'Exact numeric seed identities are required before metadata access.'
+        throw 'Exact numeric baseline identities are required before metadata access.'
     }
     $repository = Read-BaselineApi 'repos/mrlevivel/TaskbarSelect'
     $run = Read-BaselineApi ('repos/mrlevivel/TaskbarSelect/actions/runs/' + $manifest.runId)
     $artifact = Read-BaselineApi ('repos/mrlevivel/TaskbarSelect/actions/artifacts/' + $manifest.artifactId)
     $runArtifacts = Read-BaselineApi ('repos/mrlevivel/TaskbarSelect/actions/runs/' + $manifest.runId + '/artifacts?per_page=100')
-    Assert-BaselineArtifactAdmission $manifest $repository $run $artifact $runArtifacts
-    $archivePath = Join-Path $temp ('TaskbarSelect-beta16-baseline-' + [Guid]::NewGuid().ToString('N') + '.zip')
+    Assert-BaselineArtifactAdmission $version $manifest $repository $run $artifact $runArtifacts
+    $archivePath = Join-Path $temp ($baseline.Directory + '-' + [Guid]::NewGuid().ToString('N') + '.zip')
     Save-BaselineArtifact $manifest.artifactId $archivePath
     if ('sha256:' + (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $manifest.artifactDigest) {
         throw 'Downloaded baseline archive bytes differ from the reviewed digest.'
@@ -130,11 +174,10 @@ if ($version -ceq '1.0.0-beta.17') {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
     try {
-        if ($archive.Entries.Count -ne 2) { throw 'The baseline archive must contain exactly two files.' }
+        # Check every entry, including the unused portable app, before extracting.
+        Assert-BaselineArchiveContents $archive $policy.Files
         foreach ($name in @($baseline.Filename, 'SHA256SUMS.txt')) {
             $entry = @($archive.Entries | Where-Object FullName -CEQ $name)
-            $expectedLength = if ($name -ceq $baseline.Filename) { 3362501 } else { 213 }
-            if ($entry.Count -ne 1 -or $entry[0].Length -ne $expectedLength) { throw 'The exact baseline archive entry is missing, duplicated or incorrectly sized.' }
             [IO.Compression.ZipFileExtensions]::ExtractToFile($entry[0], (Join-Path $destination $name), $false)
         }
     } finally { $archive.Dispose() }

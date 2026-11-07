@@ -37,6 +37,8 @@ Metadata @{ Version = '1.0.0-beta.16'; InstallerVersion = '1.0.0-beta.16'; Notes
 Check $true 'Aligned beta.16 executable, installer, release notes and tag metadata is accepted'
 Metadata @{ Version = '1.0.0-beta.17'; InstallerVersion = '1.0.0-beta.17'; NotesHeading = '# Taskbar Select 1.0.0-beta.17'; ReleaseTag = 'v1.0.0-beta.17'; FileVersion = '1.0.0.17'; InstallerFileVersion = '1.0.0.17' }
 Check $true 'Aligned beta.17 executable, installer, release notes and tag metadata is accepted'
+Metadata @{ Version = '1.0.0-beta.18'; InstallerVersion = '1.0.0-beta.18'; NotesHeading = '# Taskbar Select 1.0.0-beta.18'; ReleaseTag = 'v1.0.0-beta.18'; FileVersion = '1.0.0.18'; InstallerFileVersion = '1.0.0.18' }
+Check $true 'Aligned beta.18 executable, installer, release notes and tag metadata is accepted'
 foreach ($version in @('1.0.0', '1.0.0-rc.1')) {
     $fileVersion = if ($version -eq '1.0.0') { '1.0.0.0' } else { '1.0.0.1' }
     Metadata @{ Version = $version; InstallerVersion = $version; NotesHeading = "# Taskbar Select $version"; ReleaseTag = "v$version"; FileVersion = $fileVersion; InstallerFileVersion = $fileVersion }
@@ -184,3 +186,4 @@ try {
     [IO.Directory]::Delete($directory)
 }
 Write-Output "PASS: $checks package guard checks. No executable or installer was launched."
+& (Join-Path $PSScriptRoot 'Test-BaselineArtifactGuards.ps1')

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.18
+
+- Fix app search leaving Telegram and similar desktop apps on their previous monitor instead of the display where search was opened.
+- Recognize verified direct shortcuts when a window has no explicit app identity, for both existing windows and newly launched apps.
+- Preserve exact executable, window lifetime, exclusions and cancellation checks; profile arguments, conflicting identities and ambiguous windows remain restricted.
+- Carry forward beta 17's features, updater address and saved-settings format.
+
 ## 1.0.0-beta.17
 
 - Prepare the reviewed Taskbar Select source for its public beta repository.

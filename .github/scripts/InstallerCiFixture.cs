@@ -37,7 +37,7 @@ internal static partial class AdministratorCiLaunchProbe
         Require(InstallerProductionVersion(version)); return version;
     }
     static bool InstallerProductionVersion(string version)
-    { return version == "1.0.0-beta.12" || version == "1.0.0-beta.13" || version == "1.0.0-beta.14" || version == "1.0.0-beta.15" || version == "1.0.0-beta.16" || version == "1.0.0-beta.17"; }
+    { return version == "1.0.0-beta.12" || version == "1.0.0-beta.13" || version == "1.0.0-beta.14" || version == "1.0.0-beta.15" || version == "1.0.0-beta.16" || version == "1.0.0-beta.17" || version == "1.0.0-beta.18"; }
     static string InstallerPreviousVersion(string version)
     {
         Require(InstallerProductionVersion(version));
@@ -45,7 +45,8 @@ internal static partial class AdministratorCiLaunchProbe
             version == "1.0.0-beta.13" ? "1.0.0-beta.12" :
             version == "1.0.0-beta.14" ? "1.0.0-beta.13" :
             version == "1.0.0-beta.15" ? "1.0.0-beta.14" :
-            version == "1.0.0-beta.16" ? "1.0.0-beta.15" : "1.0.0-beta.16";
+            version == "1.0.0-beta.16" ? "1.0.0-beta.15" :
+            version == "1.0.0-beta.17" ? "1.0.0-beta.16" : "1.0.0-beta.17";
     }
     static string[] InstallerInputs(string version)
     {
@@ -165,7 +166,7 @@ internal static partial class AdministratorCiLaunchProbe
     {
         int count = 0;
         Action<bool> check = delegate(bool value) { Require(value); count++; };
-        foreach (string version in new[] { "1.0.0-beta.12", "1.0.0-beta.13", "1.0.0-beta.14", "1.0.0-beta.15", "1.0.0-beta.16", "1.0.0-beta.17" }) {
+        foreach (string version in new[] { "1.0.0-beta.12", "1.0.0-beta.13", "1.0.0-beta.14", "1.0.0-beta.15", "1.0.0-beta.16", "1.0.0-beta.17", "1.0.0-beta.18" }) {
             string[] inputs = InstallerInputs(version);
             check(inputs.Length == 22 && inputs.Distinct(StringComparer.OrdinalIgnoreCase).Count() == inputs.Length);
             foreach (string relative in inputs) check(InstallerRelativeInput(relative));
@@ -181,7 +182,8 @@ internal static partial class AdministratorCiLaunchProbe
         check(InstallerPreviousVersion("1.0.0-beta.15") == "1.0.0-beta.14");
         check(InstallerPreviousVersion("1.0.0-beta.16") == "1.0.0-beta.15");
         check(InstallerPreviousVersion("1.0.0-beta.17") == "1.0.0-beta.16");
-        foreach (string badVersion in new[] { "", "1.0.0-beta.11", "1.0.0-beta.18", "1.0.0-beta.013", "1.0.0-beta.015", "1.0.0-beta.016", "1.0.0-beta.017", "1.0.0-beta.13-test", "1.0.0-beta.14-test", "1.0.0-beta.15-test", "1.0.0-beta.16-test", "1.0.0-beta.17-test", "1.0.0-beta.15-persistent-test", "1.0.0-beta.12-persistent-test", "1.0.0-BETA.13", "1.0.0-BETA.15", "1.0.0-BETA.16", "1.0.0-BETA.17" }) {
+        check(InstallerPreviousVersion("1.0.0-beta.18") == "1.0.0-beta.17");
+        foreach (string badVersion in new[] { "", "1.0.0-beta.11", "1.0.0-beta.19", "1.0.0-beta.013", "1.0.0-beta.015", "1.0.0-beta.016", "1.0.0-beta.017", "1.0.0-beta.018", "1.0.0-beta.13-test", "1.0.0-beta.14-test", "1.0.0-beta.15-test", "1.0.0-beta.16-test", "1.0.0-beta.17-test", "1.0.0-beta.18-test", "1.0.0-beta.15-persistent-test", "1.0.0-beta.12-persistent-test", "1.0.0-BETA.13", "1.0.0-BETA.15", "1.0.0-BETA.16", "1.0.0-BETA.17", "1.0.0-BETA.18" }) {
             check(!InstallerProductionVersion(badVersion)); check(!PersistentMaintenanceAdapterProbe.ProductionVersion(badVersion));
             bool refused = false; try { InstallerInputs(badVersion); } catch (NativeFailure) { refused = true; } check(refused);
             refused = false; try { InstallerPreviousVersion(badVersion); } catch (NativeFailure) { refused = true; } check(refused);

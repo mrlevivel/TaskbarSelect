@@ -1,6 +1,6 @@
 # Documentation images
 
-The beta 17 PNGs use the real candidate's Windows Forms controls with generic display data. The renderer is maintained in [Render-Docs.cs](../tools/Render-Docs.cs).
+The retained beta 17 PNGs use the real candidate's Windows Forms controls with generic display data. These controls are unchanged in beta 18; the Settings image still shows the older beta 17 version label. The renderer is maintained in [Render-Docs.cs](../tools/Render-Docs.cs).
 
 | Image | Contents |
 | --- | --- |

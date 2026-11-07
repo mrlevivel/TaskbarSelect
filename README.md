@@ -4,13 +4,13 @@
 
 Choose which displays show a Windows taskbar, move windows by clicking their taskbar icons on another screen, and use Ghost Bar on displays where the taskbar is hidden. Keyboard shortcuts bring app search, layouts, focus, minimize and always on top to the same workspace.
 
-**Beta 17 for Windows 11 x64.** Downloads are unsigned. See the [compatibility notes](#compatibility) before installing.
+**Beta 18 for Windows 11 x64.** Downloads are unsigned. See the [compatibility notes](#compatibility) before installing.
 
-[Download Setup](https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.17/TaskbarSelect-1.0.0-beta.17-Setup.exe) · [Release notes and checksums](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.17) · [User guide](docs/USER_GUIDE.md) · [Report a bug](https://github.com/mrlevivel/TaskbarSelect/issues/new/choose)
+[Download Setup](https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.18/TaskbarSelect-1.0.0-beta.18-Setup.exe) · [Release notes and checksums](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) · [User guide](docs/USER_GUIDE.md) · [Report a bug](https://github.com/mrlevivel/TaskbarSelect/issues/new/choose)
 
 ![Taskbar Select beta 17 Displays page with a generic four-display layout](docs/images/displays-beta17.png)
 
-*Beta 17's actual controls, rendered with generic display data in a paused isolated profile. The normal installed app omits the isolated-test label. [Image details](docs/images/README.md).*
+*These beta 17 control images use generic display data in a paused isolated profile. The controls are unchanged in beta 18; the older version label remains visible in the Settings image. The normal installed app omits the isolated-test label. [Image details](docs/images/README.md).*
 
 ## What you can do
 
@@ -22,19 +22,19 @@ Choose which displays show a Windows taskbar, move windows by clicking their tas
 - **Match your workspace.** Choose from 17 grouped accent colors, two focus-frame styles and optional frame lighting. New profiles start with Forest Green, Muted edge and no lighting.
 - **Pause when you need to.** Pause moves, pause all management, or restore and exit from the notification-area menu. Startup is optional.
 
-Beta 17 carries the connected-display shortcuts, relative sizing and maximized-move Undo into this public-beta source snapshot. Its updater is bound to this repository. Read the [release notes](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.17) for the exact package's changes and validation.
+Beta 18 fixes app search sometimes leaving desktop apps on their previous monitor instead of the display where search was opened. It retains connected-display shortcuts, relative sizing and maximized-move Undo. Its updater is bound to this repository. Read the [release notes](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for the exact package's changes and validation.
 
 ## See it in action
 
-[Watch the narrated overview — 2 minutes 13 seconds](https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.17/TaskbarSelect-overview.mp4)
+[Watch the narrated overview — 2 minutes 13 seconds](https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.18/TaskbarSelect-overview.mp4)
 
-The overview demonstrates taskbar moves, Ghost Bar, shortcuts, search, layouts and focus frames using neutral demo windows. It was recorded with an earlier isolated build and does not show every beta 17 addition.
+The overview demonstrates taskbar moves, Ghost Bar, shortcuts, search, layouts and focus frames using neutral demo windows. It was recorded with an earlier isolated build and does not show every later addition.
 
 ## Install
 
-1. Download **TaskbarSelect-1.0.0-beta.17-Setup.exe** and **SHA256SUMS.txt** from the [beta 17 release](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.17). Match the installer's SHA-256 to its entry in the checksum file.
+1. Download **TaskbarSelect-1.0.0-beta.18-Setup.exe** and **SHA256SUMS.txt** from the [beta 18 release](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18). Match the installer's SHA-256 to its entry in the checksum file.
 2. Run Setup, then open **Taskbar Select** from the Windows Start menu. Setup installs for your Windows user.
-3. For a portable copy, download **TaskbarSelect-1.0.0-beta.17-portable.zip**, extract it completely, and open `TaskbarSelect.exe`.
+3. For a portable copy, download **TaskbarSelect-1.0.0-beta.18-portable.zip**, extract it completely, and open `TaskbarSelect.exe`.
 
 Windows 11 normally includes the .NET Framework runtime the app uses. GitHub's **Source code** archives contain the source project. Choose Setup or the portable archive to run the app.
 
@@ -80,7 +80,7 @@ Before upgrading or uninstalling, turn that switch Off and wait for confirmed **
 
 Open **Settings > Check for updates** to look for a newer release. Choose **Download update**, then **Install update** and confirm when ready. The updater uses public GitHub releases without a sign-in. While this repository is private, download updates manually from the release page. Portable and isolated copies also update manually.
 
-For existing private beta 16 installations, install beta 17 manually once to move to the new updater address. Setup upgrades preserve preferences and the Startup choice. Successful uninstall removes them after recovery. [Back up your choices](docs/USER_GUIDE.md#preserve-choices-before-a-fresh-install-trial) before uninstalling.
+For existing private beta 16 installations, install beta 18 manually once to move to the new updater address. Beta 17 already uses this repository. Setup upgrades preserve preferences and the Startup choice. Successful uninstall removes them after recovery. [Back up your choices](docs/USER_GUIDE.md#preserve-choices-before-a-fresh-install-trial) before uninstalling.
 
 <details>
 <summary>Appearance and Settings previews</summary>
@@ -103,7 +103,7 @@ These images use generic data and an isolated profile. They illustrate the contr
 - Mixed scaling, stacked or disconnected displays, prolonged lock/wake, different-account Windows approval and protected apps have limited physical coverage. An app can refuse an operation even with administrator support enabled.
 - Rocket League was tested in **Borderless**. Its exclusive **Fullscreen** mode resisted both Taskbar Select and Windows' monitor shortcut.
 
-The [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.17) records the exact package's build, installer, administrator-boundary and updater results. The [testing guide](TESTING.md) describes automated coverage and remaining physical checks.
+The [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) records the exact package's build, installer, administrator-boundary and updater results. The [testing guide](TESTING.md) describes automated coverage and remaining physical checks.
 
 ## Recovery, feedback and privacy
 

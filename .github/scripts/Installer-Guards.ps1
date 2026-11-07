@@ -48,7 +48,13 @@ function Get-InstallerLifecycleBaseline {
                 SetupSha256 = 'f8bc6de104f18853a91746b156307f797367d3a55110379a9768a30ae5ae413e';
                 ChecksumsSha256 = '82c80f4601e70dd495ffdea1efa0e35d9a9de46a6f77bf2ac0d31987023ef7d7' }
         }
-        default { throw 'The lifecycle gate requires an explicitly supported production beta.12 through beta.17 artifact.' }
+        '1.0.0-beta.18' {
+            return [pscustomobject]@{ Version = '1.0.0-beta.17'; ReleaseTag = 'v1.0.0-beta.17'; Directory = 'TaskbarSelect-beta17-baseline';
+                Filename = 'TaskbarSelect-1.0.0-beta.17-Setup.exe';
+                SetupSha256 = 'e1d35af6c0d9ca9bc16f537b82d12058bbf8cb9ae1180a83f8b1b4a640350a3d';
+                ChecksumsSha256 = 'a9bc425be4ac93d3d5a4f6194a29dd2d64be4fb514898c8914e64a35fa4f50a4' }
+        }
+        default { throw 'The lifecycle gate requires an explicitly supported production beta.12 through beta.18 artifact.' }
     }
 }
 
