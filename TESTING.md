@@ -6,7 +6,7 @@ The Build workflow compiles the application and native broker with warnings as e
 
 The installer gate uses a disposable Windows account at genuine Medium integrity. It installs the hash-pinned beta 16 baseline, checks a running upgrade with synthetic saved preferences and Startup, verifies the exact target executable and registration, exercises recovery/refusal cases and cleans up its owned installation. The separate administrator boundary exercises the actual protected launch and fixed authorized operations. Interactive UAC, remembered-approval install/uninstall and reboot are separate physical checks.
 
-The first public candidate uses a draft CI baseline release containing the exact previous beta 16 installer and checksum asset. The draft is excluded from the ordinary update feed. No cross-repository credential is needed.
+The first public candidate uses a pinned Actions artifact containing the exact previous beta 16 installer and checksum asset. The build verifies the seed run, source commit, artifact identity, archive digest and both file hashes with a read-only token. The fixture is retained for 90 days; rebuilding beta 17 after expiry requires reseeding and reviewing its manifest. This CI fixture is separate from the app's update feed. No cross-repository credential is needed.
 
 ## Updater coverage
 

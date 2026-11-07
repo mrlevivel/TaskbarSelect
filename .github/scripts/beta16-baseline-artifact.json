@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "repositoryId": 1449520856,
+  "runId": "42392108180",
+  "artifactId": "13581962537",
+  "headSha": "99dfb78e0d99a89362fca225c5f6b05e2b35588e",
+  "workflowPath": ".github/workflows/seed-upgrade-baseline.yml",
+  "artifactName": "Taskbar-Select-beta16-upgrade-baseline",
+  "artifactDigest": "sha256:389df727d8b34cac15c82376e64516adb9ced1de20833c2c44ef602a8013868c"
+}
