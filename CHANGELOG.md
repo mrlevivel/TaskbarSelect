@@ -7,6 +7,7 @@
 - Preserve exact executable, window lifetime, exclusions and cancellation checks; profile arguments, conflicting identities and ambiguous windows remain restricted.
 - Carry forward beta 17's features, updater address and saved-settings format.
 - Clarify public downloads and anonymous update checks in the user, tester and bundled guides, including how private trials and draft releases differ.
+- Group application source, tests, native helper, build tools and installer definitions into folders while retaining the root build commands.
 
 ## 1.0.0-beta.17
 

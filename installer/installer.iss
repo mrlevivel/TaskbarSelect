@@ -3,8 +3,10 @@
 #define AppFileVersion "1.0.0.18"
 #define AppPublisher "Taskbar Select contributors"
 #define AppExeName "TaskbarSelect.exe"
+#define RepoRoot AddBackslash(SourcePath) + ".."
 
 [Setup]
+SourceDir={#RepoRoot}
 AppId={{A446A470-529B-42E0-AD2D-D24B31864DFC}
 AppName={#AppName}
 AppVersion={#AppVersion}

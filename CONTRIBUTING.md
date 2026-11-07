@@ -1,6 +1,6 @@
 # Contributing
 
-Taskbar Select is preparing its first public beta. Small, focused fixes and clear compatibility reports are welcome. Discuss substantial features or changes to window-management behavior in an issue before implementing them.
+Small, focused fixes and clear compatibility reports are welcome. Discuss substantial features or changes to window-management behavior in an issue before implementing them.
 
 ## Report a Bug
 
@@ -22,6 +22,22 @@ Use 64-bit Windows with the .NET Framework C# compiler included in Windows:
 Ordinary self-tests do not manipulate Explorer taskbars. The separate `--self-test-startup` integration command changes current-user startup state during testing; it is not part of the routine commands above. Do not run lifecycle, recovery fault, sign-in, or diagnostic experiments on someone else's session without approval. See [TESTING.md](TESTING.md) for coverage and live checks.
 
 Existing artwork outputs are checked in, so Node.js is not required for the normal app build. To regenerate artwork, follow [assets/ARTWORK.md](assets/ARTWORK.md).
+
+## Repository Layout
+
+| Folder or file | Purpose |
+| --- | --- |
+| `src/TaskbarSelect/` | Application and managed administrator-helper source, assembly metadata and app manifest |
+| `tests/TaskbarSelect/` | Existing self-tests, suites and the standalone work-area probe |
+| `native/` | Native administrator bootstrap source, manifest and payload configuration |
+| `build/` | Native compiler/bootstrap helpers and artwork generators |
+| `installer/` | Inno Setup definition and shared lifecycle policy |
+| `assets/` | Icons, toolbar artwork and provenance |
+| `docs/` | User, tester and native-build guides, control images and documentation tools |
+| `.github/` | Workflows, CI fixtures, package guards and issue templates |
+| `Build.ps1`, `Package.ps1` | Build commands run from the repository root |
+
+The existing self-tests remain explicit compiler inputs for the application and managed helper. Folder organization does not change that build architecture. `WorkAreaProbe.cs` remains a standalone diagnostic source and is not added to the shipping compilation.
 
 ## Changes and Documentation
 

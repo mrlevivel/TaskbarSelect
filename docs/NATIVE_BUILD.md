@@ -6,10 +6,10 @@ Use 64-bit Windows PowerShell 5.1 and the included Windows .NET Framework compil
 .\Build.ps1 -OutputDirectory C:\TaskbarSelect-build
 ```
 
-The native toolchain is portable Zig **0.15.2**, from the publisher's exact Windows x86_64 ZIP. `Get-NativeCompiler.ps1` verifies its pinned 92,614,574-byte size and SHA-256 `3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c`, then compares the extracted compiler EXE with that verified archive entry. It does not install Zig or add it to PATH. The cache must be an absolute path outside the source checkout. Choose it explicitly when needed:
+The native toolchain is portable Zig **0.15.2**, from the publisher's exact Windows x86_64 ZIP. `build/Get-NativeCompiler.ps1` verifies its pinned 92,614,574-byte size and SHA-256 `3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c`, then compares the extracted compiler EXE with that verified archive entry. It does not install Zig or add it to PATH. The cache must be an absolute path outside the source checkout. Choose it explicitly when needed:
 
 ```powershell
-.\Get-NativeCompiler.ps1 -CacheDirectory C:\TaskbarSelect-build-tools
+.\build\Get-NativeCompiler.ps1 -CacheDirectory C:\TaskbarSelect-build-tools
 .\Build.ps1 -OutputDirectory C:\TaskbarSelect-build -NativeCompilerCache C:\TaskbarSelect-build-tools
 ```
 
