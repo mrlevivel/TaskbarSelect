@@ -1,0 +1,24 @@
+# Build and release output
+artifacts/
+dist/
+*.exe
+*.pdb
+*.zip
+
+# Local validation output
+probe-original-workareas.json
+workarea-recovery.json
+backups/
+# Private trials normally live outside the checkout. These root-only patterns
+# also exclude accidental local copies without hiding docs/validation records.
+/validation/
+/profiles/
+/settings.json
+/settings.json.*
+
+# Editor and operating-system files
+.vs/
+.vscode/
+*.user
+Thumbs.db
+Desktop.ini

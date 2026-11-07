@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a taskbar, monitor, or recovery problem
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security-sensitive reports, follow SECURITY.md in the repository root. Do not post exploit details here. Review all diagnostics and attachments before submitting: do not paste raw settings, full `--inspect` output, private app/window titles, local paths, monitor serials, or screenshots you have not checked.
+  - type: input
+    attributes:
+      label: Taskbar Select version
+      placeholder: "For example: 1.0.0-beta.4 (include -local if shown)"
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Windows version and build
+      placeholder: "For example: Windows 11, build number"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Include installer or portable use and whether Explorer restarted, displays changed, or the app started at sign-in. A reboot or uninstall is not required to report a bug.
+      placeholder: "1. ..."
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Displays and scaling
+      description: Include display count, which is main, each relevant resolution/scaling, whether Windows shows taskbars on all displays, and any alternative taskbar software. Avoid serial numbers or unique device IDs.
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Movement or startup context (optional)
+      description: For movement, note whether it is enabled or paused, the sizing mode, direct button or grouped thumbnail, and whether the affected app runs as administrator. For startup, note the app switch and Windows Startup apps state. Omit private app names or paths.
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Recovery attempted (optional)
+      description: If you used Pause all or TaskbarSelect.exe --restore, describe the result and any redacted error or exit status. Do not force a crash, reboot, uninstall, or edit recovery files just to complete this report.
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Sanitized Copy diagnostics (optional)
+      description: Copy diagnostics from Settings can help, but it includes display models and layout. Review and redact it before posting. Do not use raw settings or full --inspect output.
+      render: text
+    validations:
+      required: false

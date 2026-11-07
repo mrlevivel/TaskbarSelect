@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Taskbar Select</title>
+  <desc id="desc">A monitor with a centered checkmark and taskbar stripe, using matching four-unit rounded strokes.</desc>
+  <rect width="64" height="64" rx="14" fill="#242b2a"/>
+  <rect x="10.5" y="12.5" width="43" height="31" rx="3.5" fill="none" stroke="#f2f5f3" stroke-width="4"/>
+  <g fill="none" stroke="#93efbf" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 23L30 28L40 19"/>
+    <path d="M18 35.5H46"/>
+  </g>
+  <path d="M32 45.5V51.5M22.5 53H41.5" fill="none" stroke="#f2f5f3" stroke-width="4" stroke-linecap="round"/>
+</svg>

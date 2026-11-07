@@ -1,0 +1,124 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# PR updates need one current run. Explicit manual diagnostics keep separate
+# groups, so they cannot cancel a normal build or another manual request.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  windows:
+    name: windows
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install verified Inno Setup compiler
+        timeout-minutes: 3
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          $compilerDirectory = Join-Path $env:RUNNER_TEMP 'InnoSetup6'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $download
+          if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') {
+            throw 'Inno Setup download failed SHA-256 verification.'
+          }
+          if ((Get-AuthenticodeSignature -LiteralPath $download).Status -ne 'Valid') {
+            throw 'Inno Setup download has an invalid publisher signature.'
+          }
+          $install = Start-Process -FilePath $download -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOICONS', ('/DIR="' + $compilerDirectory + '"') -WindowStyle Hidden -PassThru
+          try {
+            if (-not $install.WaitForExit(120000)) { throw 'Inno Setup installation timed out.' }
+            $install.Refresh()
+            if ($install.ExitCode -ne 0) { throw "Inno Setup installation failed: $($install.ExitCode)" }
+          } finally { $install.Dispose() }
+          if (-not (Test-Path -LiteralPath (Join-Path $compilerDirectory 'ISCC.exe'))) { throw 'Inno Setup compiler was not installed.' }
+          $compilerDirectory | Out-File -LiteralPath $env:GITHUB_PATH -Encoding ascii -Append
+      - name: Verify pinned portable native compiler
+        timeout-minutes: 5
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nativeCache = Join-Path $env:RUNNER_TEMP 'TaskbarSelect-native-toolchain'
+          $nativeCompiler = .\Get-NativeCompiler.ps1 -CacheDirectory $nativeCache
+          if (-not (Test-Path -LiteralPath $nativeCompiler -PathType Leaf)) { throw 'Verified native compiler was not produced.' }
+          ('TASKBARSELECT_NATIVE_TOOLCHAIN_CACHE=' + $nativeCache) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build, test and package
+        shell: powershell
+        run: .\Package.ps1
+      - name: Retain read-only verifier and application test diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Taskbar-Select-package-verification
+          path: |
+            artifacts/package-production*.txt
+            artifacts/package-production*-diagnostic.json
+            artifacts/package-installer-lifecycle*.txt
+            artifacts/package-installer-lifecycle*-diagnostic.json
+            artifacts/package-layout-properties*.txt
+            artifacts/package-layout-properties*-diagnostic.json
+            artifacts/package-snap-intent*.txt
+            artifacts/package-snap-intent*-diagnostic.json
+            artifacts/package-self-test*.txt
+          if-no-files-found: ignore
+      - name: Preserve unvalidated package for failure review
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Taskbar-Select-UNVALIDATED-beta-package
+          path: dist/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Download pinned released upgrade baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: .\.github\scripts\Get-InstallerLifecycleBaseline.ps1
+      - name: Validate genuine MED production installer and HIGH maintenance adapter
+        timeout-minutes: 5
+        shell: powershell
+        run: |
+          .\.github\scripts\Test-InstallerCi.ps1
+      - name: Upload installer lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Taskbar-Select-installer-smoke
+          path: artifacts/installer-ci/
+          if-no-files-found: ignore
+      - name: Validate actual HIGH/MED administrator boundary on disposable runner
+        timeout-minutes: 5
+        shell: powershell
+        run: |
+          $boundaryArguments = @{}
+          if ($env:GITHUB_REF -notlike 'refs/tags/*') {
+            $boundaryArguments.CandidateVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $PWD 'artifacts\TaskbarSelect.exe')).ProductVersion
+          }
+          .\.github\scripts\Test-AdministratorBoundary.ps1 @boundaryArguments
+      - name: Upload administrator boundary evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Taskbar-Select-administrator-boundary
+          path: artifacts/administrator-boundary/
+          if-no-files-found: ignore
+      - name: Upload validated beta package
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Taskbar-Select-beta-package
+          path: dist/
+          if-no-files-found: error
