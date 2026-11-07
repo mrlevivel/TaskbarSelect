@@ -318,15 +318,21 @@ $app=Join-Path $artifacts 'TaskbarSelect.exe'
 Require ((Hash $app) -ceq $inputSpec.target_app_sha256 -and [Diagnostics.FileVersionInfo]::GetVersionInfo($app).ProductVersion -ceq '1.0.0-beta.17' -and
     (ExactInnoVersion ([Diagnostics.FileVersionInfo]::GetVersionInfo($setup).ProductVersion) '1.0.0-beta.17')) 'Exact beta17 candidate version and app identity required.'
 Copy-Item -LiteralPath $app,$setup,$sums -Destination $inputs
-# The ordinary baseline install uses exact published beta16 bytes from the
-# same-repository private draft. The running predecessor below is deliberately
-# rebuilt from candidate beta17 source with beta16 version metadata and the
-# controlled transport seam. It is never the released beta16 updater.
-$baseline=Join-Path $artifacts 'released-beta16';FreshDirectory $baseline
-$baselineRelease=Api ('repos/'+$repository+'/releases/tags/ci-upgrade-baseline-beta16')
-Require ($baselineRelease.tag_name -ceq 'ci-upgrade-baseline-beta16' -and $baselineRelease.draft -eq $true) 'Exact same-repository private draft baseline required.'
-& gh release download ci-upgrade-baseline-beta16 --repo $repository --pattern 'TaskbarSelect-1.0.0-beta.16-Setup.exe' --pattern 'SHA256SUMS.txt' --dir $baseline
-Require ($LASTEXITCODE -eq 0 -and (Hash (Join-Path $baseline 'TaskbarSelect-1.0.0-beta.16-Setup.exe')) -ceq 'f8bc6de104f18853a91746b156307f797367d3a55110379a9768a30ae5ae413e' -and
+# The normal donor downloader admits the exact same-repository beta16 Actions
+# artifact with a read-only token. The tree comparison above keeps that script,
+# its guard policy and its reviewed artifact manifest equal to the donor.
+# The running predecessor below is rebuilt from candidate beta17 source with
+# beta16 version metadata and the controlled transport seam. It is never the
+# released beta16 updater.
+foreach($relative in @('.github/scripts/Get-InstallerLifecycleBaseline.ps1', '.github/scripts/Installer-Guards.ps1', '.github/scripts/beta16-baseline-artifact.json')){
+    $localInput=Join-Path $root $relative;$donorInput=Join-Path $donor $relative
+    Require ((Test-Path -LiteralPath $localInput -PathType Leaf) -and (Test-Path -LiteralPath $donorInput -PathType Leaf) -and
+        (Hash $localInput) -ceq (Hash $donorInput)) 'Normal baseline downloader inputs must match the compiled donor.'
+}
+& (Join-Path $PSScriptRoot 'Get-InstallerLifecycleBaseline.ps1')
+Require ($LASTEXITCODE -eq 0) 'Normal read-only baseline artifact download failed.'
+$baseline=Join-Path ([IO.Path]::GetFullPath($env:RUNNER_TEMP)) 'TaskbarSelect-beta16-baseline'
+Require ((Hash (Join-Path $baseline 'TaskbarSelect-1.0.0-beta.16-Setup.exe')) -ceq 'f8bc6de104f18853a91746b156307f797367d3a55110379a9768a30ae5ae413e' -and
     (Hash (Join-Path $baseline 'SHA256SUMS.txt')) -ceq '82c80f4601e70dd495ffdea1efa0e35d9a9de46a6f77bf2ac0d31987023ef7d7') 'Exact published beta16 bootstrap assets required.'
 Copy-Item -LiteralPath (Join-Path $baseline 'TaskbarSelect-1.0.0-beta.16-Setup.exe') -Destination $inputs
 $replace=@{'@TARGET_APP_SHA256@'=$inputSpec.target_app_sha256;'@TARGET_SETUP_SHA256@'=$inputSpec.target_setup_sha256;'@TARGET_SUMS_SHA256@'=$inputSpec.target_sums_sha256}
