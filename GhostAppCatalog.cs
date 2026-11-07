@@ -368,6 +368,22 @@ namespace TaskbarSelect
                 String.Equals(expected.PackageId, current.PackageId, StringComparison.Ordinal);
         }
 
+        internal static bool CanMatchUnidentifiedExecutable(GhostApp app)
+        {
+            if (app == null || !app.CatalogShortcut || !String.IsNullOrEmpty(app.PackageId) ||
+                !String.IsNullOrEmpty(app.Arguments) || String.IsNullOrWhiteSpace(app.ShortcutAppId) ||
+                app.ShortcutAppId.Length > 200 || app.ShortcutAppId.Any(Char.IsControl) ||
+                !String.Equals(app.AppKey, "app:" + app.ShortcutAppId, StringComparison.Ordinal)) return false;
+            // A plain installed shortcut already has exact executable authority
+            // when it omits an app ID. Its optional grouping ID must not erase
+            // that authority for a window with a verifiably absent HWND ID.
+            // Reconstruct the catalog shape: no profile arguments, generic
+            // command host, update broker, package entry or fabricated ID.
+            var canonical = FromShortcut(app.Name, app.LaunchPath, app.TargetPath, app.Arguments,
+                app.WorkingDirectory, app.ShortcutAppId, delegate { return true; });
+            return SameShortcut(app, canonical);
+        }
+
         internal sealed class NewWindowLaunchPlan
         {
             internal readonly string File, Parameters, Directory, Verb;

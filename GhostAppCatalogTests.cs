@@ -46,6 +46,21 @@ namespace TaskbarSelect
                 "Plain app shortcut exposes an exact executable identity and keeps the original launch link");
             GhostApp grouped = Shortcut("Neutral grouped", "C:\\Neutral\\fixture.exe", "", "Contoso.Neutral");
             check(grouped != null && grouped.AppKey == "app:Contoso.Neutral", "Explicit shortcut app identity is kept exactly");
+            check(GhostAppCatalog.CanMatchUnidentifiedExecutable(grouped),
+                "A canonical plain shortcut retains exact executable matching when its grouping ID is absent on the window");
+            foreach (string arguments in new[] { "--profile=Neutral", "--source-shortcut-location=start-menu", "-workdir C:\\Neutral", " " })
+                check(!GhostAppCatalog.CanMatchUnidentifiedExecutable(Shortcut("Neutral grouped", "C:\\Neutral\\fixture.exe", arguments, "Contoso.Neutral")),
+                    "Argument-bearing shortcuts never gain missing-window-ID executable authority: " + arguments);
+            check(!GhostAppCatalog.CanMatchUnidentifiedExecutable(null) && !GhostAppCatalog.CanMatchUnidentifiedExecutable(direct) &&
+                !GhostAppCatalog.CanMatchUnidentifiedExecutable(Shortcut("Neutral updater", "C:\\Neutral\\Update.exe", "", "Contoso.Neutral")),
+                "Missing grouping identity and generic update launchers cannot use the missing-window-ID fallback");
+            foreach (string field in new[] { "Id", "LaunchPath", "TargetPath", "ShortcutAppId", "AppKey", "PackageId" }) {
+                var malformed = grouped.Copy(); typeof(GhostApp).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic).SetValue(malformed, "different");
+                check(!GhostAppCatalog.CanMatchUnidentifiedExecutable(malformed),
+                    "Noncanonical shortcut identity cannot gain executable fallback authority: " + field);
+            }
+            var notCatalogued = grouped.Copy(); notCatalogued.CatalogShortcut = false;
+            check(!GhostAppCatalog.CanMatchUnidentifiedExecutable(notCatalogued), "Only catalogued installed shortcuts may use missing-window-ID fallback");
             GhostApp profile = Shortcut("Neutral profile", "C:\\Neutral\\fixture.exe", "--profile-directory=Default");
             check(profile != null && profile.AppKey == "", "Argument-bearing shortcut cannot claim every window in a shared executable");
             GhostApp launcher = Shortcut("Neutral launcher", "C:\\Neutral\\Update.exe", "--processStart Neutral.exe");

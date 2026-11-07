@@ -23,10 +23,10 @@ namespace TaskbarSelect
             internal bool Allowed = true, MoveResult = true, Chooser, ThrowRead, NullRead, ThrowLaunch, ThrowMove, ThrowTargets;
             internal string Version = "settings-1";
             internal string ExplicitId = "";
-            internal bool ThrowIdentity;
+            internal bool ThrowIdentity, IdentityAbsentVerified, ThrowIdentityAbsent;
             internal long Now = 100;
-            internal int Reads, Launches, NewWindowLaunches, Moves, Notifications, IdentityReads;
-            internal Action DuringRead, DuringLaunch, DuringMove, DuringIdentity;
+            internal int Reads, Launches, NewWindowLaunches, Moves, Notifications, IdentityReads, IdentityAbsentReads;
+            internal Action DuringRead, DuringLaunch, DuringMove, DuringIdentity, DuringIdentityAbsent;
             internal Display MovedDestination;
             internal ShelfWindow MovedWindow;
             internal GhostApp LaunchedApp;
@@ -44,7 +44,8 @@ namespace TaskbarSelect
                         if (DuringMove != null) DuringMove(); if (ThrowMove) throw new InvalidOperationException(); return MoveResult;
                     }, delegate(GhostApp app) { return Launch(app, false); },
                     delegate { return Version; }, delegate { return Now; }, 1000, delegate(Action worker) { Workers.Enqueue(worker); },
-                    delegate { IdentityReads++; if (DuringIdentity != null) DuringIdentity(); if (ThrowIdentity) throw new InvalidOperationException(); return ExplicitId; }, newLauncher);
+                    delegate { IdentityReads++; if (DuringIdentity != null) DuringIdentity(); if (ThrowIdentity) throw new InvalidOperationException(); return ExplicitId; }, newLauncher,
+                    delegate { IdentityAbsentReads++; if (DuringIdentityAbsent != null) DuringIdentityAbsent(); if (ThrowIdentityAbsent) throw new InvalidOperationException(); return IdentityAbsentVerified; });
                 Coordinator.Changed += delegate { Notifications++; };
             }
             GhostLaunchResult Launch(GhostApp app, bool newWindow)
@@ -69,7 +70,7 @@ namespace TaskbarSelect
 
         internal static void Run(Action<bool, string> check)
         {
-            Admission(check); Existing(check); LaunchAndWait(check); Identity(check); ExplicitWindowIdentity(check); ChromeAttributionPlacement(check); NewWindowMode(check); Cancellation(check); Failures(check); CrossSessionLaunchLease(check); WorkerContract(check);
+            Admission(check); Existing(check); LaunchAndWait(check); Identity(check); ExplicitWindowIdentity(check); DirectShortcutPlacement(check); ChromeAttributionPlacement(check); NewWindowMode(check); Cancellation(check); Failures(check); CrossSessionLaunchLease(check); WorkerContract(check);
         }
         static void NewWindowMode(Action<bool, string> check)
         {
@@ -102,7 +103,7 @@ namespace TaskbarSelect
                     "New-window mode uses its dedicated launcher exactly once before any placement at variant " + variant);
                 f.Step();
                 check(f.Coordinator.Succeeded && f.Moves == 1 && Object.ReferenceEquals(f.MovedWindow, created) &&
-                    f.MovedWindow.AppKey == authority && CapturedChromeDestination(f) && !f.Coordinator.Busy && f.NewWindowLaunches == 1,
+                    f.MovedWindow.AppKey == authority && CapturedDestination(f) && !f.Coordinator.Busy && f.NewWindowLaunches == 1,
                     "Only the new lifetime is placed, including same-PID/new-HWND and recycled identities at variant " + variant);
                 check(f.LaunchedApp.AppKey == "app:Chrome" && f.LaunchedApp.Arguments == "--source-shortcut-location=start-menu",
                     "New-window delegate receives the immutable canonical catalog selection at variant " + variant);
@@ -208,11 +209,170 @@ namespace TaskbarSelect
             return GhostAppCatalog.FromShortcut("Neutral Chrome", @"C:\Fixtures\Chrome.lnk", @"C:\Fixtures\chrome.exe",
                 "--source-shortcut-location=start-menu", @"C:\Fixtures", "Chrome", delegate { return true; });
         }
-        static bool CapturedChromeDestination(Fixture f)
+        static bool CapturedDestination(Fixture f)
         {
             var moved = f.MovedDestination;
             return moved != null && !Object.ReferenceEquals(moved, f.Target) && moved.Device == f.Target.Device && moved.Identity == f.Target.Identity &&
                 moved.X == -1920 && moved.Y == -1080 && moved.Width == 1920 && moved.Height == 1080;
+        }
+        static GhostApp DirectShortcut()
+        {
+            return GhostAppCatalog.FromShortcut("Neutral direct app", @"C:\Fixtures\App.lnk", @"C:\Fixtures\App.exe",
+                "", @"C:\Fixtures", "Fixture.ShortcutOnly", delegate { return true; });
+        }
+        static void CompleteUnmatched(Fixture f, GhostApp app)
+        {
+            f.Coordinator.Begin(app, f.Target);
+            for (int step = 0; step < 3 && f.Workers.Count != 0; step++) f.Step();
+            f.Advance(1000); f.Coordinator.Poll();
+        }
+        static void DirectShortcutPlacement(Action<bool, string> check)
+        {
+            const string authority = @"exe:C:\Fixtures\App.exe";
+            using (var f = new Fixture()) {
+                var app = DirectShortcut(); f.IdentityAbsentVerified = true;
+                var window = f.Window(42, 7, authority); f.Windows.Add(window);
+                check(app != null && app.AppKey == "app:Fixture.ShortcutOnly" && app.CatalogShortcut &&
+                    app.TargetPath == @"C:\Fixtures\App.exe" && app.Arguments == "" && f.Coordinator.Begin(app, f.Target),
+                    "Direct shortcut placement receives canonical neutral catalog provenance and its exact executable target");
+                f.Step();
+                check(f.Coordinator.Succeeded && !f.Coordinator.Started && f.Moves == 1 && f.Launches == 0 &&
+                    Object.ReferenceEquals(f.MovedWindow, window) && f.MovedWindow.AppKey == authority && window.AppKey == authority &&
+                    f.IdentityAbsentReads >= 2 && CapturedDestination(f),
+                    "A shortcut-only app ID with verified absent HWND identity reuses its exact executable window on the captured monitor");
+                f.Coordinator.Poll(); f.Coordinator.Poll();
+                check(f.Moves == 1 && f.Launches == 0,
+                    "Successful direct shortcut reuse cannot trigger another move or launch on later polling");
+            }
+            for (int handoff = 0; handoff < 3; handoff++) using (var f = new Fixture()) {
+                var app = DirectShortcut(); f.IdentityAbsentVerified = true;
+                uint windowProcess = handoff == 0 ? 17u : 555u;
+                f.LaunchResult.ProcessId = handoff == 1 ? 0u : 17u;
+                f.DuringLaunch = delegate { f.Windows.Add(f.Window(42, windowProcess, authority)); };
+                f.Coordinator.Begin(app, f.Target); f.Step(); f.Step(); f.Step();
+                check(f.Coordinator.Started && f.Coordinator.Succeeded && f.Launches == 1 && f.Moves == 1 &&
+                    f.MovedWindow.Process == windowProcess && f.MovedWindow.AppKey == authority && CapturedDestination(f),
+                    "Fresh direct shortcut launch or exact single-instance handoff reaches the captured monitor at case " + handoff);
+                check(f.LaunchedApp != null && !Object.ReferenceEquals(f.LaunchedApp, app) &&
+                    GhostAppCatalog.SameShortcut(f.LaunchedApp, app) && f.LaunchedApp.LaunchPath == @"C:\Fixtures\App.lnk" &&
+                    f.LaunchedApp.AppKey == "app:Fixture.ShortcutOnly" && f.LaunchedApp.Arguments == "",
+                    "Direct shortcut fallback preserves the selected launch link and app identity at case " + handoff);
+            }
+            using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = true; f.Windows.Add(f.Window(42, 7, authority.ToUpperInvariant()));
+                f.Coordinator.Begin(DirectShortcut(), f.Target); f.Step();
+                check(f.Coordinator.Succeeded && f.Moves == 1 && f.Launches == 0,
+                    "Direct shortcut executable authority follows case-insensitive Windows path identity");
+            }
+            using (var f = new Fixture()) {
+                f.ExplicitId = "Fixture.ShortcutOnly"; f.ThrowIdentityAbsent = true;
+                f.Windows.Add(f.Window(42, 7, authority)); f.Coordinator.Begin(DirectShortcut(), f.Target); f.Step();
+                check(f.Coordinator.Succeeded && f.Moves == 1 && f.Launches == 0 && f.IdentityAbsentReads == 0,
+                    "An exact explicit HWND identity retains its existing authority without an unrelated absence query");
+            }
+            foreach (string explicitId in new[] { "Other.App", "Fixture.ShortcutOnly.Other", " Fixture.ShortcutOnly", " " }) using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = true; f.ExplicitId = explicitId; f.Windows.Add(f.Window(42, 17, authority));
+                CompleteUnmatched(f, DirectShortcut());
+                check(f.Moves == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy,
+                    "A present conflicting or nonempty HWND identity cannot use direct executable fallback: " + explicitId);
+            }
+            for (int unavailable = 0; unavailable < 3; unavailable++) using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = unavailable != 0;
+                f.ThrowIdentity = unavailable == 1; f.ThrowIdentityAbsent = unavailable == 2;
+                f.Windows.Add(f.Window(42, 17, authority)); CompleteUnmatched(f, DirectShortcut());
+                check(f.Moves == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy,
+                    "Missing or failed explicit-identity absence proof grants no executable fallback authority at case " + unavailable);
+            }
+            for (int change = 0; change < 3; change++) using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = true; f.Windows.Add(f.Window(42, 7, authority));
+                f.Coordinator.Begin(DirectShortcut(), f.Target); f.Worker();
+                if (change == 0) f.IdentityAbsentVerified = false;
+                if (change == 1) f.ExplicitId = "Other.App";
+                if (change == 2) f.ThrowIdentityAbsent = true;
+                f.Coordinator.Poll();
+                check(f.Moves == 0 && f.Launches == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy &&
+                    f.Coordinator.Status.IndexOf("identity", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "Direct shortcut absence proof is rechecked before movement after candidate discovery at change " + change);
+            }
+            foreach (string key in new[] { @"exe:C:\Other\App.exe", @"exe:C:\Fixtures\App.exe.bak", "app:Other.App", "" }) using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = true; f.Windows.Add(f.Window(42, 17, key)); CompleteUnmatched(f, DirectShortcut());
+                check(f.Moves == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy,
+                    "Verified absent HWND identity never grants authority over a different or missing executable: " + key);
+            }
+            for (int invalid = 0; invalid < 3; invalid++) using (var f = new Fixture()) {
+                var window = f.Window(42, 17, authority); f.IdentityAbsentVerified = true;
+                if (invalid == 0) window.Handle = IntPtr.Zero;
+                if (invalid == 1) window.Process = 0;
+                if (invalid == 2) window.ProcessStarted = 0;
+                f.Windows.Add(window); CompleteUnmatched(f, DirectShortcut());
+                check(f.Moves == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy,
+                    "Direct shortcut executable fallback cannot bypass missing HWND, PID or process birth identity at case " + invalid);
+            }
+            Action<GhostApp>[] malformed = {
+                app => app.CatalogShortcut = false,
+                app => app.PackageId = "Fixture.Package_abcdefghijklm!App",
+                app => app.Arguments = "--profile=neutral",
+                app => app.Arguments = " ",
+                app => app.TargetPath = @"C:\Fixtures\Update.exe",
+                app => app.TargetPath = "",
+                app => app.ShortcutAppId = "Other.App",
+                app => app.ShortcutAppId = "",
+                app => app.AppKey = "app:Other.App",
+                app => app.Id = "shortcut:malformed",
+                app => app.LaunchPath = @"C:\Fixtures\App.exe"
+            };
+            for (int invalid = 0; invalid < malformed.Length; invalid++) using (var f = new Fixture()) {
+                var app = DirectShortcut(); malformed[invalid](app); f.IdentityAbsentVerified = true;
+                f.Windows.Add(f.Window(42, 17, authority)); CompleteUnmatched(f, app);
+                check(f.Moves == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy,
+                    "Malformed, argument-bearing, broker or package shortcut provenance cannot claim executable fallback at case " + invalid);
+            }
+            foreach (string arguments in new[] { "--profile=neutral", "--processStart Neutral.exe" }) using (var f = new Fixture()) {
+                var app = GhostAppCatalog.FromShortcut("Neutral launch entry", @"C:\Fixtures\Launch.lnk", @"C:\Fixtures\App.exe",
+                    arguments, @"C:\Fixtures", "Fixture.ShortcutOnly", delegate { return true; });
+                f.IdentityAbsentVerified = true; f.Windows.Add(f.Window(42, 17, authority)); CompleteUnmatched(f, app);
+                check(app != null && app.AppKey == "" && f.Moves == 0 && !f.Coordinator.Succeeded,
+                    "Canonical profile or launcher arguments retain their existing lack of placement authority: " + arguments);
+            }
+            using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = true; f.Windows.Add(f.Window(42, 7, authority)); f.Windows.Add(f.Window(43, 8, authority));
+                f.Coordinator.Begin(DirectShortcut(), f.Target); f.Step();
+                check(f.Moves == 0 && f.Launches == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy && f.Coordinator.Status.Contains("multiple"),
+                    "Direct shortcut executable fallback preserves ambiguity among multiple existing windows");
+            }
+            using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = true;
+                f.DuringLaunch = delegate { f.Windows.Add(f.Window(42, 555, authority)); f.Windows.Add(f.Window(43, 556, authority)); };
+                f.Coordinator.Begin(DirectShortcut(), f.Target); f.Step(); f.Step(); f.Step();
+                check(f.Moves == 0 && f.Launches == 1 && f.Coordinator.Started && !f.Coordinator.Succeeded &&
+                    !f.Coordinator.Busy && f.Coordinator.Status.Contains("multiple"),
+                    "Direct shortcut launch cannot guess among several exact handoff windows outside its launcher PID");
+            }
+            for (int invalidation = 0; invalidation < 5; invalidation++) using (var f = new Fixture()) {
+                var app = DirectShortcut(); f.IdentityAbsentVerified = true; f.Windows.Add(f.Window(42, 7, authority));
+                f.Coordinator.Begin(app, f.Target); f.Worker();
+                if (invalidation == 0) f.Coordinator.Cancel();
+                if (invalidation == 1) f.Version = "settings-2";
+                if (invalidation == 2) f.Target.Identity = "replacement";
+                if (invalidation == 3) f.Rules.Add(new AppRule { Key = app.AppKey });
+                if (invalidation == 4) f.Allowed = false;
+                f.Coordinator.Poll();
+                check(f.Moves == 0 && f.Launches == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy,
+                    "Direct shortcut fallback preserves cancellation, settings, destination, exclusion and active-session fences at case " + invalidation);
+            }
+            using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = true; f.Coordinator.Begin(DirectShortcut(), f.Target); f.Step(); f.Step();
+                f.Coordinator.Cancel(); f.Windows.Add(f.Window(42, 17, authority)); f.Step();
+                check(f.Moves == 0 && f.Launches == 1 && f.Coordinator.Started && !f.Coordinator.Succeeded && !f.Coordinator.Busy,
+                    "Closing search after direct shortcut launch discards a later exact executable window");
+            }
+            using (var f = new Fixture()) {
+                f.IdentityAbsentVerified = true; f.Windows.Add(f.Window(42, 7, authority));
+                f.Coordinator.Begin(DirectShortcut(), f.Target); f.Worker();
+                f.DuringIdentityAbsent = delegate { f.Target.Width = 1280; }; f.Coordinator.Poll();
+                check(f.Moves == 0 && !f.Coordinator.Succeeded && !f.Coordinator.Busy,
+                    "Destination changes during the final absence proof cancel direct shortcut placement before movement");
+            }
         }
         static void ChromeAttributionPlacement(Action<bool, string> check)
         {
@@ -224,7 +384,7 @@ namespace TaskbarSelect
                     "Coordinator receives the actual catalog classification for a Chrome attribution shortcut");
                 f.Step();
                 check(f.Coordinator.Succeeded && !f.Coordinator.Started && f.Moves == 1 && f.Launches == 0 && f.IdentityReads == 2 &&
-                    f.MovedWindow.Handle == window.Handle && f.MovedWindow.AppKey == processAuthority && window.AppKey == processAuthority && CapturedChromeDestination(f),
+                    f.MovedWindow.Handle == window.Handle && f.MovedWindow.AppKey == processAuthority && window.AppKey == processAuthority && CapturedDestination(f),
                     "An existing exact Chrome HWND identity moves to the captured monitor without launch or changing process authority");
             }
             for (int handoff = 0; handoff < 3; handoff++) using (var f = new Fixture()) {
@@ -234,7 +394,7 @@ namespace TaskbarSelect
                 f.DuringLaunch = delegate { f.Windows.Add(f.Window(42, windowProcess, processAuthority)); };
                 f.Coordinator.Begin(app, f.Target); f.Step(); f.Step(); f.Step();
                 check(f.Coordinator.Started && f.Coordinator.Succeeded && f.Launches == 1 && f.Moves == 1 &&
-                    f.MovedWindow.Process == windowProcess && f.MovedWindow.AppKey == processAuthority && CapturedChromeDestination(f),
+                    f.MovedWindow.Process == windowProcess && f.MovedWindow.AppKey == processAuthority && CapturedDestination(f),
                     "Fresh Chrome launch or unique single-instance handoff places the exact app on its captured monitor at case " + handoff);
                 check(f.LaunchedApp != null && !Object.ReferenceEquals(f.LaunchedApp, app) && f.LaunchedApp.AppKey == "app:Chrome" &&
                     f.LaunchedApp.Arguments == "--source-shortcut-location=start-menu" && f.LaunchedApp.ShortcutAppId == "Chrome" &&

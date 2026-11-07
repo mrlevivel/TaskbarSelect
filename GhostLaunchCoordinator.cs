@@ -46,6 +46,7 @@ namespace TaskbarSelect
         readonly Func<GhostApp, GhostLaunchResult> launch, launchNewWindow;
         readonly Func<string> contextVersion;
         readonly Func<ShelfWindow, string> windowIdentity;
+        readonly Func<ShelfWindow, bool> windowIdentityAbsentVerified;
         readonly Func<long> clock;
         readonly Action<Action> schedule;
         readonly long timeoutTicks, probeTicks;
@@ -60,15 +61,17 @@ namespace TaskbarSelect
         internal GhostLaunchCoordinator(Func<List<Display>> targets, Func<List<AppRule>> exclusions,
             Func<bool> allowed, Func<List<ShelfWindow>> windows, Func<ShelfWindow, Display, bool> move,
             Func<GhostApp, GhostLaunchResult> launch, Func<string> contextVersion = null,
-            Func<ShelfWindow, string> windowIdentity = null, Func<GhostApp, GhostLaunchResult> launchNewWindow = null)
+            Func<ShelfWindow, string> windowIdentity = null, Func<GhostApp, GhostLaunchResult> launchNewWindow = null,
+            Func<ShelfWindow, bool> windowIdentityAbsentVerified = null)
             : this(targets, exclusions, allowed, windows, move, launch, contextVersion,
-                Stopwatch.GetTimestamp, DefaultTimeoutMilliseconds, ScheduleSta, windowIdentity, launchNewWindow) { }
+                Stopwatch.GetTimestamp, DefaultTimeoutMilliseconds, ScheduleSta, windowIdentity, launchNewWindow, windowIdentityAbsentVerified) { }
 
         internal GhostLaunchCoordinator(Func<List<Display>> targets, Func<List<AppRule>> exclusions,
             Func<bool> allowed, Func<List<ShelfWindow>> windows, Func<ShelfWindow, Display, bool> move,
             Func<GhostApp, GhostLaunchResult> launch, Func<string> contextVersion,
             Func<long> clock, int timeoutMilliseconds, Action<Action> schedule,
-            Func<ShelfWindow, string> windowIdentity = null, Func<GhostApp, GhostLaunchResult> launchNewWindow = null)
+            Func<ShelfWindow, string> windowIdentity = null, Func<GhostApp, GhostLaunchResult> launchNewWindow = null,
+            Func<ShelfWindow, bool> windowIdentityAbsentVerified = null)
         {
             if (targets == null || exclusions == null || allowed == null || windows == null || move == null ||
                 launch == null || clock == null || schedule == null) throw new ArgumentNullException("callbacks");
@@ -76,6 +79,10 @@ namespace TaskbarSelect
             this.targets = targets; this.exclusions = exclusions; this.allowed = allowed; this.windows = windows;
             this.move = move; this.launch = launch; this.launchNewWindow = launchNewWindow; this.contextVersion = contextVersion ?? delegate { return ""; };
             this.windowIdentity = windowIdentity ?? delegate(ShelfWindow w) { return WindowAppIdentity.Read(w.Handle); };
+            this.windowIdentityAbsentVerified = windowIdentityAbsentVerified ?? delegate(ShelfWindow w) {
+                string identity;
+                return WindowAppIdentity.TryRead(w.Handle, out identity) && String.IsNullOrEmpty(identity);
+            };
             this.clock = clock; this.schedule = schedule;
             timeoutTicks = Math.Max(1, Stopwatch.Frequency * (long)timeoutMilliseconds / 1000);
             probeTicks = Math.Max(1, Stopwatch.Frequency * ProbeIntervalMilliseconds / 1000);
@@ -253,8 +260,15 @@ namespace TaskbarSelect
             // Classic app shortcuts can publish their identity on each HWND
             // while retaining exe: process authority. Preserve that authority
             // for the shared mover, and compare only the complete explicit ID.
-            return request.AppKey.StartsWith("app:", StringComparison.OrdinalIgnoreCase) &&
-                String.Equals(request.AppKey, "app:" + (windowIdentity(window) ?? ""), StringComparison.OrdinalIgnoreCase);
+            if (!request.AppKey.StartsWith("app:", StringComparison.OrdinalIgnoreCase)) return false;
+            string explicitIdentity = windowIdentity(window) ?? "";
+            if (String.Equals(request.AppKey, "app:" + explicitIdentity, StringComparison.OrdinalIgnoreCase)) return true;
+            // The exact executable remains authority only for canonical plain
+            // shortcuts. A failed query or a different explicit window ID is
+            // never evidence of absence, and profile/broker entries stay strict.
+            return String.IsNullOrEmpty(explicitIdentity) && GhostAppCatalog.CanMatchUnidentifiedExecutable(request.App) &&
+                String.Equals(window.AppKey, "exe:" + request.App.TargetPath, StringComparison.OrdinalIgnoreCase) &&
+                windowIdentityAbsentVerified(window);
         }
         internal void Poll()
         {
