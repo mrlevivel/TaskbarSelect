@@ -1,14 +1,14 @@
 # Beta Tester Guide
 
-> **Beta.18 private release candidate for Windows 11 x64.** Repository access remains limited.
+> **Beta 18 for Windows 11 x64.** Use the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for downloads and exact-build validation.
 
-Beta.18 fixes app search opening desktop apps on the previous monitor and retains connected-display shortcuts, relative sizing and maximized-move Undo. Use the reviewed candidate assets supplied by the maintainer. The executable and installer are unsigned. Taskbar Select relies on unsupported Windows taskbar behavior. Save work first and stop if taskbars or windows behave unexpectedly.
+Beta 18 fixes app search opening desktop apps on the previous monitor and retains connected-display shortcuts, relative sizing and maximized-move Undo. Download the installer or portable package and matching checksums from the release page. The executable and installer are unsigned. Taskbar Select relies on unsupported Windows taskbar behavior. Save work first and stop if taskbars or windows behave unexpectedly.
 
 See the [testing scope](../TESTING.md), [release notes](../RELEASE_NOTES.md) and [beta 18 release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for candidate evidence. Real mixed-DPI and stacked/disconnected hardware, different-account UAC, prolonged lock/wake, and other PCs remain important gaps.
 
 ## Download and Install
 
-1. Obtain the reviewed beta.18 installer and checksum from the maintainer.
+1. Download the beta 18 installer and checksum file from the official release page.
 2. Compare the SHA-256 of **TaskbarSelect-1.0.0-beta.18-Setup.exe** with its matching line in **SHA256SUMS.txt** before running it.
 3. Use Windows 11 x64, whose included .NET Framework normally needs no extra runtime installation. Run Setup for your Windows user without administrator access, then open **Taskbar Select** from Start. SmartScreen may warn because this build is unsigned; a checksum verifies integrity rather than publisher identity. If it is blocked, stop and check with the person providing the build rather than changing security settings.
 
@@ -54,7 +54,7 @@ Report the exact version and observed result. Stop if an action's outcome is unc
 
 ## Guided Update Check
 
-On a supplied candidate, open **Settings > Check for updates**. It should remain responsive while checking and show plain-text release notes or a clear unavailable/up-to-date result. **The repository is still private, so anonymous checks currently report unavailable**, even when a signed-in browser can view it. Do not provide credentials or a GitHub token; the app has no token-based fallback. Closing the update window should cancel pending work without changing preferences or permission settings.
+Open **Settings > Check for updates**. It should remain responsive while checking and show plain-text release notes or a clear unavailable/up-to-date result. A private repository is unavailable to the anonymous updater even when a signed-in browser can view it, and draft releases are not offered as updates. During a private trial, use the reviewed Setup provided by the maintainer. Do not provide credentials or a GitHub token; the app has no token-based fallback. Closing the update window should cancel pending work without changing preferences or permission settings.
 
 Only when a maintainer supplies a reviewed newer public release and explicitly arranges an upgrade trial: check **Download update**, cancellation and retry, then **Install update** with its separate confirmation. Use the installed production app opened normally; portable, isolated and elevated copies must not start installation. If Administrator support is On or approval is saved, turn its existing Settings switch Off, approve Windows if asked and wait for confirmed Off. Cancelled or failed removal must block installation. After the upgrade, compare saved appearance, monitor, shortcut and Startup choices. A changed build needs fresh administrator approval. Do not uninstall or replace your regular app simply to complete this guide.
 

@@ -1,6 +1,6 @@
 # Taskbar Select 1.0.0-beta.18
 
-Public-beta candidate for Windows 11 x64, prepared privately for review. Downloads remain unsigned.
+Beta 18 for Windows 11 x64. Downloads remain unsigned. See the [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for the distributed files, checksums and exact-build validation.
 
 ## Changes
 

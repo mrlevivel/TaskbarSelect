@@ -6,6 +6,7 @@
 - Recognize verified direct shortcuts when a window has no explicit app identity, for both existing windows and newly launched apps.
 - Preserve exact executable, window lifetime, exclusions and cancellation checks; profile arguments, conflicting identities and ambiguous windows remain restricted.
 - Carry forward beta 17's features, updater address and saved-settings format.
+- Clarify public downloads and anonymous update checks in the user, tester and bundled guides, including how private trials and draft releases differ.
 
 ## 1.0.0-beta.17
 
