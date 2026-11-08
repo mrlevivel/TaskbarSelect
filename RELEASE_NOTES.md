@@ -1,28 +1,44 @@
 # Taskbar Select 1.0.0-beta.18
 
-Beta 18 for Windows 11 x64. Downloads remain unsigned. See the [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for the distributed files, checksums and exact-build validation.
+**Windows 11 x64 · Unsigned beta**
 
-## Changes
+## What changed
 
-- Fix app search opening Telegram and similar desktop apps on the previously used monitor instead of the display where search was opened.
-- Bring an already running matching app to the search display, or place its newly launched window there.
-- Retain exact executable and window-lifetime checks when a direct installed shortcut has an app identity but its window does not. Conflicting identities, failed identity queries, profile arguments, broker launches and ambiguous windows do not gain broader placement authority.
-- Carry forward beta 17's taskbar moves, Ghost Bar, connected-display shortcuts, relative sizing, Undo, search actions, focus frames, pinning and optional administrator support. Saved preferences and the updater address are unchanged.
+- **App search uses the display where you searched.** Telegram and similar desktop apps can now be brought to that display when already running, or placed there after a fresh launch.
+- Retains taskbar-click moves, Ghost Bar, connected-display shortcuts, relative sizing, minimize and Undo, always on top, focus frames and optional administrator support.
+- The source repository is organized into application, test, native, build and installer folders. Existing build commands and application behavior are retained.
 
-## Upgrading
+## Install or upgrade
 
-Download beta 18 Setup manually while the repository remains private. Beta 17 already uses this repository's updater address. Earlier private beta 16 installations need one manual upgrade to migrate from the original repository.
+Use **TaskbarSelect-1.0.0-beta.18-Setup.exe** for installation or **TaskbarSelect-1.0.0-beta.18-portable.zip** for a portable copy. Verify the chosen file against **SHA256SUMS.txt**. Downloads are unsigned; Windows may warn or block them. Keep Windows security protections enabled.
 
-Before running Setup, turn Administrator support fully Off and approve Windows' removal prompt if requested. Setup preserves preferences and the Startup choice. Enable Administrator support again with a fresh Windows approval if wanted for this build.
+Before upgrading, turn **Settings > Administrator support** fully **Off**, approving Windows' removal prompt if requested. Setup preserves saved preferences and the Startup choice. Enable support again with a fresh Windows approval if wanted for this build.
 
-After public release, Settings > Check for updates uses this repository's public GitHub releases. Portable and isolated copies update manually.
+Private beta 16 users need one manual upgrade to this repository's release. Beta 17 and later already use its updater address. While the repository is private, download Setup manually; published releases are available through **Settings > Check for updates**. Portable and isolated copies update manually.
 
-## Limits and validation
+## Known limitations
 
-The search fix passed a regression that fails with the previous coordinator, focused identity/placement checks, a neutral Windows launch/reuse test and private Telegram checks in an isolated build. The distributed beta 18 package must pass its own build, applicable suite, package guards, genuine normal/administrator boundaries, exact beta 17 installer upgrade and controlled updater qualification. See the release page for executed results and hashes; isolated-build counts do not qualify changed package bytes.
+- Native Windows snapping can leave the former hidden-taskbar strip. Optional **Experimental snapping** provides separate Windows+Left/Right placement and starts Off each launch. Snap Assist, groups and quarter layouts can behave differently.
+- Most physical experience is on one four-monitor PC. Other hardware, mixed scaling, stacked or disconnected displays, prolonged lock/wake, different-account Windows approval and protected apps have limited coverage.
+- The overview was recorded with an earlier isolated demo build and does not show every later feature. Current online control previews use neutral beta 18 data.
 
-The control images were captured from beta 17 using generic display data. Its controls are unchanged in beta 18; the older version label remains visible in the Settings image. The overview uses an earlier isolated demo build.
+## Validation status
 
-Native Windows snapping can retain the former hidden-taskbar strip. Optional experimental snapping starts Off after each app launch and provides separate half-window placement and monitor cycling.
+The hosted build, installer and administrator checks passed, as did the controlled private updater trial. **A separate local interactive run failed a native focus/input-stability check after detecting changed desktop input and a denied focus grant.** That failure remains recorded; hosted success does not establish that the local case is resolved.
 
-Broader hardware, physical mixed scaling, prolonged wake/lock, different-account Windows approval and protected-app compatibility remain limited. Keep Windows security protections enabled if an unsigned download is blocked.
+Anonymous public download and update-feed checks remain pending an approved public launch. The controlled updater trial used synthetic preferences and a source-built predecessor with version metadata; it was not the exact released beta 17 updater or the live anonymous feed.
+
+<details>
+<summary>Validation details and source provenance</summary>
+
+The frozen downloads were built from [8ef9fbd](https://github.com/mrlevivel/TaskbarSelect/tree/8ef9fbdffdccd45195bde091cc7e0d90d0b31cc6). Later main-branch changes polish online documentation and images; the installer, portable archive and their bundled documents remain the exact qualified files from that source.
+
+- [Build 42423141972](https://github.com/mrlevivel/TaskbarSelect/actions/runs/42423141972): 38,567 application checks, 156 genuine installer checks, 25 maintenance checks and 1,216 administrator-boundary assertions, plus package and baseline guards.
+- [Private updater trial 42447023903](https://github.com/mrlevivel/TaskbarSelect/actions/runs/42447023903): 124 runtime and four outer checks; one approved ordinary Run action, exact installation, synthetic settings and Startup retention, normal reopens and complete disposable-account cleanup.
+- The local interactive attempt failed after 37,990 checks and is retained as a failed attempt.
+- Source organization preserved all 215 moved application/test/native/configuration/manifest files byte-for-byte and the same 210 explicit compiler inputs in the same order.
+- The exact downloads and hosted output passed focused privacy review. These checks do not constitute an independent security certification or broad hardware validation.
+
+See [TESTING.md](https://github.com/mrlevivel/TaskbarSelect/blob/8ef9fbdffdccd45195bde091cc7e0d90d0b31cc6/TESTING.md) for the testing scope. The attached **SHA256SUMS.txt** is the checksum reference for these downloads.
+
+</details>
