@@ -82,7 +82,9 @@ On **Apps**, choose **Add app** and select a running application to leave on its
 
 Desktop apps match their executable path; packaged apps match their Windows app identity. Excluded apps also stay out of the Ghost Bar.
 
-### Monitor Shortcuts and Fullscreen Movement (Beta.8)
+<a id="monitor-shortcuts-and-fullscreen-movement-beta8"></a>
+
+### Monitor Shortcuts and Fullscreen Movement
 
 **Shortcuts > Window movement** shows one row per connected Windows display. Displays 1–4 default to Ctrl+Shift+1 through Ctrl+Shift+4. Choose a shortcut for any additional display. Bindings follow Windows display numbers and stay saved while a display is disconnected. They activate when the corresponding display number returns. Shortcuts work independently of taskbar-click movement. Pause moves and Pause all suspend them. The Taskbar Select Settings window can move and be undone like other eligible windows.
 
