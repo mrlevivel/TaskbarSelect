@@ -22,9 +22,9 @@ Choose which monitors show a Windows taskbar, move windows by clicking their tas
 
 ## See it in action
 
-[Watch the narrated overview — 2 minutes 13 seconds](https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.18/TaskbarSelect-overview.mp4)
+[Watch the narrated overview — 2 minutes 17 seconds](https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.18/TaskbarSelect-overview.mp4)
 
-The overview shows taskbar moves, Ghost Bar, search, layouts and focus frames using neutral demo windows. It was recorded with an earlier isolated build; some later features are described in the [user guide](docs/USER_GUIDE.md).
+The beta 18 overview shows taskbar moves, Ghost Bar, shortcuts, search, layouts and focus frames using neutral demo windows. See the [user guide](docs/USER_GUIDE.md) for more details.
 
 *Reviewing an unpublished build? Direct download and video links activate when its release is published. If you can view the draft, open its assets from [Releases](https://github.com/mrlevivel/TaskbarSelect/releases) in your signed-in browser.*
 

@@ -20,7 +20,10 @@ Private beta 16 users need one manual upgrade to this repository's release. Beta
 
 - Native Windows snapping can leave the former hidden-taskbar strip. Optional **Experimental snapping** provides separate Windows+Left/Right placement and starts Off each launch. Snap Assist, groups and quarter layouts can behave differently.
 - Most physical experience is on one four-monitor PC. Other hardware, mixed scaling, stacked or disconnected displays, prolonged lock/wake, different-account Windows approval and protected apps have limited coverage.
-- The overview was recorded with an earlier isolated demo build and does not show every later feature. Current online control previews use neutral beta 18 data.
+
+## Overview
+
+Open **TaskbarSelect-overview.mp4** in the release assets for a 2:17 narrated walkthrough of beta 18 using neutral demo windows.
 
 ## Validation status
 
