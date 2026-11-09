@@ -26,8 +26,6 @@ Choose which monitors show a Windows taskbar, move windows by clicking their tas
 
 The beta 18 overview shows taskbar moves, Ghost Bar, shortcuts, search, layouts and focus frames using neutral demo windows. See the [user guide](docs/USER_GUIDE.md) for more details.
 
-*Reviewing an unpublished build? Direct download and video links activate when its release is published. If you can view the draft, open its assets from [Releases](https://github.com/mrlevivel/TaskbarSelect/releases) in your signed-in browser.*
-
 ## Install and get started
 
 1. Download **Setup** and **SHA256SUMS.txt** from the [beta 18 release](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18), and compare the installer's SHA-256 with its checksum entry. Run Setup, then open Taskbar Select from Start.

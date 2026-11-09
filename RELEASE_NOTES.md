@@ -14,7 +14,7 @@ Use **TaskbarSelect-1.0.0-beta.18-Setup.exe** for installation or **TaskbarSelec
 
 Before upgrading, turn **Settings > Administrator support** fully **Off**, approving Windows' removal prompt if requested. Setup preserves saved preferences and the Startup choice. Enable support again with a fresh Windows approval if wanted for this build.
 
-Private beta 16 users need one manual upgrade to this repository's release. Beta 17 and later already use its updater address. While the repository is private, download Setup manually; published releases are available through **Settings > Check for updates**. Portable and isolated copies update manually.
+Private beta 16 users need one manual upgrade to this release. Installed copies of beta 17 and later can use **Settings > Check for updates**. Portable and isolated copies update manually.
 
 ## Known limitations
 
@@ -29,7 +29,7 @@ Open **TaskbarSelect-overview.mp4** in the release assets for a 2:17 narrated wa
 
 The hosted build, installer and administrator checks passed, as did the controlled private updater trial. **A separate local interactive run failed a native focus/input-stability check after detecting changed desktop input and a denied focus grant.** That failure remains recorded; hosted success does not establish that the local case is resolved.
 
-Anonymous public download and update-feed checks remain pending an approved public launch. The controlled updater trial used synthetic preferences and a source-built predecessor with version metadata; it was not the exact released beta 17 updater or the live anonymous feed.
+Signed-out downloads passed. The shipped beta 17 updater found beta 18 on the live GitHub feed and retrieved the checksum file and Setup with matching SHA-256 hashes. The separate controlled installation trial used synthetic preferences and a source-built predecessor with version metadata.
 
 <details>
 <summary>Validation details and source provenance</summary>
