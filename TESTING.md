@@ -1,18 +1,20 @@
 # Testing Taskbar Select
 
-## Beta 18 release qualification
+## Beta 19 release qualification
 
 The Build workflow compiles the application and native broker with warnings as errors, executes the applicable integrated suite, verifies production-profile and lifecycle contracts, and compares the exact eight portable entries to their build inputs.
 
-The installer gate uses a disposable Windows account at genuine Medium integrity. It installs the hash-pinned beta 17 baseline, checks a running upgrade with synthetic saved preferences and Startup, verifies the exact target executable and registration, exercises recovery/refusal cases and cleans up its owned installation. The separate administrator boundary exercises the actual protected launch and fixed authorized operations. Interactive UAC, remembered-approval install/uninstall and reboot are separate physical checks.
+The installer gate uses a disposable Windows account at genuine Medium integrity. It installs the hash-pinned public beta 18 baseline, checks a running upgrade with synthetic saved preferences and Startup, verifies the exact target executable and registration, exercises recovery and refusal cases, and cleans up its owned installation. The separate administrator boundary exercises the actual protected launch and fixed authorized operations. Interactive UAC, remembered-approval install and uninstall, and reboot are separate physical checks.
 
-Beta 18 uses the exact beta 17 installer and checksums from its successful normal Build artifact. The build verifies the qualifying run, source commit, artifact identity, archive digest, exact entries and file hashes with a read-only token. The pinned artifact has a limited retention period; rebuilding after expiry requires a reviewed replacement fixture manifest. This CI fixture is separate from the app's update feed. No cross-repository credential is needed.
+The baseline uses the exact Setup and checksum files from the [published beta 18 release](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18), verified against pinned SHA-256 hashes. This installer fixture is separate from the app's update feed.
+
+Monitor identity tests cover mismatched legacy records, disabled and reconnected monitors, duplicate and incomplete paths, saved nicknames and taskbar preferences, and connected-display shortcuts. The lookup fix was also checked on a four-monitor Windows 11 desktop. During a display disconnect, each remaining screen retained its original name and settings key. All four matched after reconnecting.
 
 ## Updater coverage
 
 Focused tests cover numeric version ordering, exact official feed and asset URLs, repository-specific GitHub CDN redirects, rejection of the legacy repository and asset namespace, hostile URLs, bounded responses, digest/checksum disagreement, staging identity, tampering, cancellation and install eligibility.
 
-A complete controlled updater trial must exercise the Settings button, checking, download progress, No then Yes confirmation, ordinary Setup and normal reopens with preserved synthetic preferences. A source-built test predecessor or controlled transport must be identified in its result. Signed-out public feed, CDN and installation acceptance require the approved public launch and cannot be established while the repository is private.
+A complete controlled updater trial must exercise the Settings button, checking, download progress, No then Yes confirmation, ordinary Setup and normal reopens with preserved synthetic preferences. Record any source-built test predecessor and controlled transport separately from signed-out checks of the published GitHub feed and downloads.
 
 ## Running tests
 
@@ -33,4 +35,4 @@ Use the [beta tester guide](docs/BETA_TEST_GUIDE.md) for taskbar visibility, ord
 
 Most physical experience is on one four-monitor Windows 11 PC. Different Windows builds, physical scaling combinations, stacked/disconnected displays, prolonged lock/wake, other protected apps and different-account UAC still need broader testing. Synthetic geometry passes describe their fixtures rather than every hardware arrangement.
 
-The [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) is the authority for the distributed candidate's exact hashes, executed checks, skips and limits.
+See the [official releases](https://github.com/mrlevivel/TaskbarSelect/releases) for the distributed packages' exact hashes, executed checks, skips and limits.

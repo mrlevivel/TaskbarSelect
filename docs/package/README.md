@@ -1,10 +1,10 @@
 # Taskbar Select
 
-> **Beta 18 for Windows 11 x64.** Download from the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) and verify the package against its matching checksum before use.
+> **Beta 19 for Windows 11 x64.** Download from the [official releases](https://github.com/mrlevivel/TaskbarSelect/releases) and verify the package against its matching checksum before use.
 
 Choose which secondary monitors show the native Windows taskbar, and optionally bring windows to the monitor whose taskbar you use.
 
-This is **1.0.0-beta.18**, with the app-search placement fix, connected-display shortcuts, relative sizing for floating and snapped windows, and maximized-move Undo. Taskbar Select relies on unsupported Explorer behavior that Windows updates can change. Read the bundled `RELEASE_NOTES.md` and `TESTING.md` for the changes and verification scope.
+This is **1.0.0-beta.19**, with a fix for incorrect monitor names after a display is disabled in Windows Settings. Taskbar Select relies on unsupported Explorer behavior that Windows updates can change. Read the bundled `RELEASE_NOTES.md` and `TESTING.md` for the changes and verification scope.
 
 **Native snapping limitation:** with experimental snapping Off, Windows+Left/Right and already-maximized windows can retain the former hidden-taskbar strip. Automatic correction of those native layouts remains disabled. The optional session mode below provides separate app-owned halves; native Snap Assist, groups, suggestions and quarter layouts can differ. Taskbar-click moves, explicit layouts and shortcut-minimize Undo retain their own rules.
 
@@ -20,7 +20,7 @@ This is **1.0.0-beta.18**, with the app-search placement fix, connected-display 
 First choose **Restore and exit** in any running Taskbar Select copy and confirm recovery succeeded. Open PowerShell in the extracted portable folder and run:
 
 ```powershell
-$testProfile = Join-Path $env:LOCALAPPDATA 'TaskbarSelect-beta18-trial'
+$testProfile = Join-Path $env:LOCALAPPDATA 'TaskbarSelect-beta19-trial'
 Start-Process -FilePath (Join-Path $PWD 'TaskbarSelect.exe') -ArgumentList ('--test-profile "{0}"' -f $testProfile)
 ```
 
@@ -32,13 +32,13 @@ This explicit profile keeps trial preferences separate and disables Startup chan
 
 The shared desktop lock still permits only one taskbar controller. Stop the trial successfully before returning to your installed copy. The portable archive does not contain the maintainer's integration-folder launchers.
 
-Builds are unsigned and SmartScreen may warn. Checksums establish integrity, not publisher identity. Confirm the source before running; if security software blocks it, stop and verify the source or report the problem. The beta 18 downloads are **TaskbarSelect-1.0.0-beta.18-Setup.exe**, **TaskbarSelect-1.0.0-beta.18-portable.zip** and **SHA256SUMS.txt**.
+Builds are unsigned and SmartScreen may warn. Confirm the source before running. If security software blocks the download, verify the source or report the problem. The beta 19 downloads are **TaskbarSelect-1.0.0-beta.19-Setup.exe**, **TaskbarSelect-1.0.0-beta.19-portable.zip** and **SHA256SUMS.txt**.
 
 Installed and portable copies share your saved choices and Startup entry. Before switching copies, choose **Restore and exit** on the running app and confirm it stopped; closing its settings window is insufficient. Upgrades preserve choices. For a fresh-install trial or uninstall, first copy `%LOCALAPPDATA%\TaskbarSelect\settings.json` and any **Taskbar Select.lnk** from `shell:startup` into a private backup, noting the shortcut target and Windows Startup-app state. Do not delete recovery files. A separate Windows user or test PC gives clean defaults without changing your usual profile.
 
 ## Guided Updates
 
-While this repository is private, download and run beta 18 Setup manually. Beta 17 already uses this updater address; earlier private beta 16 installations need one manual upgrade to migrate to it.
+Installed beta 17 and later use the public updater address. Earlier private beta 16 installations need one manual upgrade to migrate to it.
 
 Open **Settings > Check for updates** to check for a newer official beta or stable release and read its notes. Choose **Download update** for a cancellable download, then **Install update** and explicitly confirm to open Setup. The release checksum and expected installer are verified before launch. Setup preserves preferences and Startup choices. No update check runs at startup or in the background, and nothing installs automatically.
 
@@ -123,4 +123,4 @@ For an upgrade or uninstall, run Setup normally. These operations will not reque
 
 The new lifecycle preserves settings and Startup on upgrade, including remembered-support intent. A changed app build needs explicit approval by turning **Administrator support** on in Settings; upgrade never transfers the previous build's approval silently. Successful uninstall requires recovered taskbars and confirmed absence of the saved task and its fixed protected native/ledger files before settings and Startup are deleted. Empty protected parent directories and dormant manual launcher staging may remain.
 
-See the bundled `TESTING.md` for beta.18 qualification and remaining checks. Existing private beta 16 installations need one manual beta 18 installation to migrate to the new updater address.
+See the bundled `TESTING.md` for beta 19 qualification and remaining checks.

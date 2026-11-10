@@ -181,6 +181,13 @@ if ($version -cin @('1.0.0-beta.17', '1.0.0-beta.18')) {
             [IO.Compression.ZipFileExtensions]::ExtractToFile($entry[0], (Join-Path $destination $name), $false)
         }
     } finally { $archive.Dispose() }
+} elseif ($baseline.PSObject.Properties['PublicReleaseBase']) {
+    # Use the published baseline even when validation runs in a private repository.
+    # The public release needs no workflow token or other credentials.
+    [void][IO.Directory]::CreateDirectory($destination)
+    foreach ($name in @($baseline.Filename, 'SHA256SUMS.txt')) {
+        Invoke-WebRequest -UseBasicParsing -Uri ($baseline.PublicReleaseBase + $name) -OutFile (Join-Path $destination $name) -TimeoutSec 60 -MaximumRedirection 2
+    }
 } else {
     gh release download $baseline.ReleaseTag --repo $env:GITHUB_REPOSITORY --pattern $baseline.Filename --pattern 'SHA256SUMS.txt' --dir $destination
     if ($LASTEXITCODE -ne 0) { throw 'Released lifecycle baseline download failed.' }

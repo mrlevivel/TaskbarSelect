@@ -1,6 +1,6 @@
 #define AppName "Taskbar Select"
-#define AppVersion "1.0.0-beta.18"
-#define AppFileVersion "1.0.0.18"
+#define AppVersion "1.0.0-beta.19"
+#define AppFileVersion "1.0.0.19"
 #define AppPublisher "Taskbar Select contributors"
 #define AppExeName "TaskbarSelect.exe"
 #define RepoRoot AddBackslash(SourcePath) + ".."

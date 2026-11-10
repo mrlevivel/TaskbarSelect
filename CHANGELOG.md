@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-beta.19
+
+- Fix duplicate monitor names after disabling a display in Windows Settings by matching each screen to its active monitor interface.
+- Keep saved nicknames, taskbar visibility, and Ghost Bar choices associated with verified monitor identities. When a match is ambiguous, show a generic monitor label and defer those preferences until the match can be verified.
+
 ## 1.0.0-beta.18
 
 - Fix app search leaving Telegram and similar desktop apps on their previous monitor instead of the display where search was opened.

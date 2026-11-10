@@ -2,7 +2,7 @@
 
 ## Current candidate
 
-Taskbar Select beta 18 is a Windows 11 x64 beta. It is unsigned. The [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) records the exact package and validation scope.
+Taskbar Select beta 19 is an unsigned Windows 11 x64 beta. The [official releases](https://github.com/mrlevivel/TaskbarSelect/releases) list the exact packages and validation scope.
 
 Taskbar Select normally runs with standard permissions. Optional Administrator support uses a separately approved helper and remembers approval for the exact user, profile and build. Search launches retain normal permissions when the app is launched normally. An already elevated caller's token is inherited, so open the app normally for ordinary use and updates.
 
@@ -26,6 +26,6 @@ Automated boundary checks and app movement trials describe their exact fixtures.
 
 ## Reporting
 
-Keep vulnerability details and exploit steps out of public issues. Use **Security > Report a vulnerability** when available. Before public announcement, the maintainer must enable and verify that private route. While it is unavailable, open an issue containing only a request for a private contact channel and wait for confirmation before sending sensitive details.
+Use **Security > Report a vulnerability** to share vulnerability details and exploit steps privately. If the form is unavailable, open an issue asking for a private contact channel and share the details after the maintainer confirms that channel.
 
 Include the app version, Windows build, impact and minimal reproduction in a private report. Remove credentials, unnecessary app/window titles, monitor serials and private paths from attachments. An ordinary compatibility regression can use the normal bug form.
