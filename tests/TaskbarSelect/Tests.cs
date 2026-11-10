@@ -3279,11 +3279,11 @@ namespace TaskbarSelect
                 Assert(!Native.Hide(new Bar { Primary = true }), "Native hide refuses primary");
                 Assert(!Native.Hide(new Bar { Visible = false, Managed = false }), "Does not claim someone else's hidden window");
                 Assert(!Native.IsSecondaryTaskbar(new Bar()), "Invalid handle cannot be managed");
-                Assert(MonitorNames.NormalizeWindowsIdentity(@"\\?\DISPLAY#ACR0746#5&sample&UID1#{guid}") == @"DISPLAY\ACR0746\5&SAMPLE&UID1", "Normalizes display identity for EDID matching");
-                Assert(MonitorNames.NormalizeWindowsIdentity(@"DISPLAY\SAM707D\sample_0") == @"DISPLAY\SAM707D\SAMPLE", "Normalizes WMI monitor suffix");
-                Assert(MonitorNames.Decode(new ushort[] { 88, 66, 50, 55, 51, 0, 70 }) == "XB273", "Decodes WMI monitor text");
-                Assert(MonitorNames.Format("ACR", "0746", "XB273 GX") == "Acer XB273 GX", "Formats manufacturer and model name");
-                Assert(MonitorNames.Format("ADA", "0004", "") == "ADA 0004", "Falls back to EDID manufacturer and product");
+                Assert(MonitorNames.NormalizeWindowsIdentity(@"\\?\DISPLAY#TST1001#5&sample&UID1#{guid}") == @"DISPLAY\TST1001\5&SAMPLE&UID1", "Normalizes display identity for EDID matching");
+                Assert(MonitorNames.NormalizeWindowsIdentity(@"DISPLAY\TST1002\sample_0") == @"DISPLAY\TST1002\SAMPLE", "Normalizes WMI monitor suffix");
+                Assert(MonitorNames.Decode(new ushort[] { 77, 49, 48, 48, 0, 70 }) == "M100", "Decodes WMI monitor text");
+                Assert(MonitorNames.Format("ACR", "1001", "Test Panel") == "Acer Test Panel", "Formats manufacturer and model name");
+                Assert(MonitorNames.Format("TST", "1002", "") == "TST 1002", "Falls back to EDID manufacturer and product");
                 string startupCommand = Startup.CommandFor(@"C:\Folder With Spaces\TaskbarSelect.exe");
                 Assert(startupCommand == "\"C:\\Folder With Spaces\\TaskbarSelect.exe\" --startup", "Startup path is quoted");
                 Assert(Startup.IsOwned(startupCommand), "Recognizes owned startup command");
