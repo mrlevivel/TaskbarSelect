@@ -66,7 +66,7 @@ $common = @('/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/warnas
     '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.Web.Extensions.dll', '/r:System.Management.dll',
     ("/r:$(Join-Path $wpf 'UIAutomationClient.dll')"), ("/r:$(Join-Path $wpf 'UIAutomationTypes.dll')"), ("/r:$(Join-Path $wpf 'WindowsBase.dll')"),
     ("/win32icon:$icon"), ("/win32manifest:$manifest"), ("/resource:$icon,TaskbarSelect.Icon"))
-$sources = @('src\TaskbarSelect\AssemblyInfo.cs', 'src\TaskbarSelect\Native.cs', 'src\TaskbarSelect\MonitorNames.cs', 'src\TaskbarSelect\TaskbarMover.cs', 'src\TaskbarSelect\Program.cs', 'src\TaskbarSelect\DisplayIdentifier.cs', 'src\TaskbarSelect\WorkAreas.cs', 'src\TaskbarSelect\Startup.cs', 'tests\TaskbarSelect\Tests.cs') |
+$sources = @('src\TaskbarSelect\AssemblyInfo.cs', 'src\TaskbarSelect\Native.cs', 'src\TaskbarSelect\DisplayConfigMonitors.cs', 'src\TaskbarSelect\MonitorNames.cs', 'src\TaskbarSelect\TaskbarMover.cs', 'src\TaskbarSelect\Program.cs', 'src\TaskbarSelect\DisplayIdentifier.cs', 'src\TaskbarSelect\WorkAreas.cs', 'src\TaskbarSelect\Startup.cs', 'tests\TaskbarSelect\Tests.cs') |
     ForEach-Object { Join-Path $PSScriptRoot $_ }
 foreach ($source in ($sources + $newSources)) { if (-not (Test-Path -LiteralPath $source)) { throw "A required shared source file is missing: $source" } }
 $nativeOutput = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'administrator-native'

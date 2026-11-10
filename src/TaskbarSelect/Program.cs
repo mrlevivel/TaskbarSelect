@@ -556,7 +556,7 @@ namespace TaskbarSelect
         }
         void DiscoverConnectedDisplays()
         {
-            Displays = Native.Displays(true);
+            Displays = Native.Displays();
             SyncMonitorShortcuts();
         }
         internal void MoveFocusedWindow(int number, IntPtr foreground)
@@ -698,7 +698,7 @@ namespace TaskbarSelect
         {
             var scope = selected.ToArray();
             var result = Recovery.Run(delegate { Areas.RestoreSelected(scope); }, delegate {
-                var displays = Native.Displays(true);
+                var displays = Native.Displays();
                 var selectedBars = Native.Bars().Where(bar => !bar.Primary && scope.Any(area => {
                     var record = area.ToRecord();
                     var matches = displays.Where(d => String.Equals(d.Identity, record.Identity, StringComparison.OrdinalIgnoreCase)).ToList();

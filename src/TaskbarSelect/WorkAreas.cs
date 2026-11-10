@@ -86,7 +86,7 @@ namespace TaskbarSelect
             Native.Rect rect;
             return Native.GetWindowRect(new IntPtr(bar.Handle), out rect) ? rect : (Native.Rect?)null;
         }
-        public List<Display> Displays() { return Native.Displays(true); }
+        public List<Display> Displays() { return Native.Displays(); }
         public void Set(Native.Rect rect)
         {
             Attempts++; LastRequested = rect;

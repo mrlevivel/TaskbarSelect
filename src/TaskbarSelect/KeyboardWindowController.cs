@@ -61,7 +61,7 @@ namespace TaskbarSelect
                 AppCatalog.Matches(Settings.ExcludedApps, window.AppKey) || !Native.GetWindowRect(foreground, out bounds)) return null;
             var monitor = new Native.MonitorInfo { Size = Marshal.SizeOf(typeof(Native.MonitorInfo)) };
             if (!Native.GetMonitorInfo(Native.MonitorFromWindow(foreground, 2), ref monitor)) return null;
-            var connected = Native.Displays(true);
+            var connected = Native.Displays();
             var matches = connected.Where(d => d.Device == monitor.Device && !String.IsNullOrWhiteSpace(d.Identity)).ToArray();
             if (matches.Length != 1 || connected.Count(d => d.Identity == matches[0].Identity) != 1 ||
                 monitor.Work.Right <= monitor.Work.Left || monitor.Work.Bottom <= monitor.Work.Top || TaskbarMover.ForegroundWindow() != foreground) return null;
@@ -74,7 +74,7 @@ namespace TaskbarSelect
             if (invocation == null) return false;
             Native.MonitorInfo monitor;
             if (!Native.TryMonitor(invocation.Monitor.Device, out monitor) || !TaskbarMover.ReturnPlacement.SameMonitor(invocation.Monitor, monitor)) return false;
-            var connected = Native.Displays(true);
+            var connected = Native.Displays();
             var physical = connected.Where(d => d.Identity == invocation.Display.Identity).ToArray();
             return physical.Length == 1 && KeyboardSearchDestination.Same(invocation.Display, physical[0]) &&
                 WindowShelfManager.ReadDpi(physical[0]) == invocation.Dpi;

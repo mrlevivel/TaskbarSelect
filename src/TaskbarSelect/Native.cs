@@ -32,7 +32,6 @@ namespace TaskbarSelect
     internal static class Native
     {
         internal const string Marker = "TaskbarSelect.Hidden.v1.9F89C156";
-        static readonly Dictionary<string, DisplayDevice> deviceCache = new Dictionary<string, DisplayDevice>();
         [StructLayout(LayoutKind.Sequential)] internal struct Rect { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         internal struct MonitorInfo
@@ -72,26 +71,24 @@ namespace TaskbarSelect
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr RemoveProp(IntPtr window, string name);
         [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 
-        internal static List<Display> Displays(bool refresh = false)
+        internal static List<Display> Displays()
         {
-            if (refresh) deviceCache.Clear();
             var result = new List<Display>();
             Dictionary<string, string> monitorNames = MonitorNames.Read();
+            var activeTargets = DisplayConfigMonitors.Read();
             EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, delegate(IntPtr monitor, IntPtr dc, ref Rect bounds, IntPtr data)
             {
                 var info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
                 if (!GetMonitorInfo(monitor, ref info)) return true;
-                DisplayDevice device;
-                bool found = deviceCache.TryGetValue(info.Device, out device);
-                if (!found) {
-                    device = new DisplayDevice { Size = Marshal.SizeOf(typeof(DisplayDevice)) };
-                    found = EnumDisplayDevices(info.Device, 0, ref device, 1);
-                    if (found) deviceCache[info.Device] = device;
+                string identity = "", friendlyName = "Monitor";
+                DisplayConfigMonitors.Target target;
+                if (activeTargets.TryGetValue(info.Device, out target)) {
+                    var legacy = new DisplayDevice { Size = Marshal.SizeOf(typeof(DisplayDevice)) };
+                    identity = EnumDisplayDevices(info.Device, 0, ref legacy, 1) ?
+                        DisplayConfigMonitors.PreserveIdentitySpelling(target.Identity, legacy.Identity) : target.Identity;
+                    if (!monitorNames.TryGetValue(MonitorNames.NormalizeWindowsIdentity(identity), out friendlyName))
+                        friendlyName = String.IsNullOrWhiteSpace(target.Name) ? "Monitor" : target.Name;
                 }
-                string identity = found ? device.Identity : "";
-                string friendlyName;
-                if (!monitorNames.TryGetValue(MonitorNames.NormalizeWindowsIdentity(identity), out friendlyName))
-                    friendlyName = found ? device.Description : "Monitor";
                 result.Add(new Display {
                     Device = info.Device, Identity = identity,
                     Name = friendlyName, Primary = (info.Flags & 1) != 0,

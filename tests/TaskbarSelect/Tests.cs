@@ -25,6 +25,7 @@ namespace TaskbarSelect
         internal static int RunWakePolicies()
         {
             try {
+                MonitorIdentityMappingChecks();
                 Assert(WorkAreaGuardTests.RunPureTest() == 0, "Work-area ownership and bounded mutation regressions");
                 Assert(WorkAreaReclaimTests.RunPureTest() == 0, "Delayed wake reclaim regressions");
                 Assert(SnapCorrectionPolicyTests.RunPureTest() == 0, "Bounded window correction regressions");
@@ -39,6 +40,69 @@ namespace TaskbarSelect
                 Assert(SnapLayoutRetirementAdversarialTests.RunPureTest() == 0, "Receipt retirement ownership and reentrancy regressions");
                 return 0;
             } catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+        }
+        static void MonitorIdentityMappingChecks()
+        {
+            const string first = @"\\.\DISPLAY1", second = @"\\.\DISPLAY2", third = @"\\.\DISPLAY3", fourth = @"\\.\DISPLAY4";
+            const string firstPath = @"\\?\DISPLAY#TST1001#sample&UID1#{monitor-guid}";
+            const string secondPath = @"\\?\DISPLAY#TST1002#sample&UID2#{monitor-guid}";
+            const string thirdPath = @"\\?\DISPLAY#TST1003#sample&UID3#{monitor-guid}";
+            const string fourthPath = @"\\?\DISPLAY#TST1004#sample&UID4#{monitor-guid}";
+            var firstMonitor = new DisplayConfigMonitors.Target(first.ToLowerInvariant(), firstPath, "Monitor A");
+            var secondMonitor = new DisplayConfigMonitors.Target(second, secondPath, "Monitor B");
+            var thirdMonitor = new DisplayConfigMonitors.Target(third, thirdPath, "Monitor C");
+            var fourthMonitor = new DisplayConfigMonitors.Target(fourth, fourthPath, "Monitor D");
+
+            var disconnected = DisplayConfigMonitors.ResolveTargets(new[] { secondMonitor, thirdMonitor, firstMonitor });
+            Assert(disconnected.Count == 3 && !disconnected.ContainsKey(fourth), "A disabled target does not appear in the active monitor mapping");
+            Assert(disconnected[first].Name == "Monitor A" && disconnected[second].Name == "Monitor B" && disconnected[third].Name == "Monitor C",
+                "Active target names follow their display sources independently of path order and source casing");
+            foreach (var target in disconnected.Values) {
+                Assert(DisplayConfigMonitors.PreserveIdentitySpelling(target.Identity, fourthPath) == target.Identity,
+                    "A disabled monitor identity reported by legacy enumeration never overrides a verified active target");
+            }
+
+            var reconnected = DisplayConfigMonitors.ResolveTargets(new[] { fourthMonitor, firstMonitor, secondMonitor, thirdMonitor });
+            string savedIdentity = fourthPath.ToLowerInvariant();
+            Assert(reconnected.Count == 4 && reconnected[fourth].Name == "Monitor D", "Reconnecting a monitor restores its own target name");
+            var settings = new Settings();
+            settings.MonitorAliases.Add(savedIdentity, "Side monitor");
+            settings.HiddenIdentities.Add(savedIdentity);
+            settings.WindowShelfIdentities.Add(savedIdentity);
+            var connectedDisplays = reconnected.Values.Select(target => new Display {
+                Device = target.Source.ToUpperInvariant(), Name = target.Name, Width = 1920, Height = 1080,
+                Identity = DisplayConfigMonitors.PreserveIdentitySpelling(target.Identity, savedIdentity)
+            }).ToList();
+            Display restored = MonitorShortcutPolicy.Target(connectedDisplays, 4);
+            Assert(restored.Identity == savedIdentity && settings.DisplayName(restored) == "Side monitor",
+                "A verified legacy spelling keeps the saved nickname attached to the reconnected physical monitor");
+            Assert(Policy.Hide(new Bar { Device = fourth }, connectedDisplays, settings) &&
+                Policy.Shelf(restored, connectedDisplays, settings, true, false),
+                "The same physical monitor recovers its saved taskbar visibility and Ghost Bar preferences");
+            Assert(!Policy.Hide(new Bar { Device = first }, connectedDisplays, settings),
+                "A different verified monitor does not inherit the saved taskbar preference");
+
+            var missing = new DisplayConfigMonitors.Target(first, "", "Unverified");
+            var missingTarget = DisplayConfigMonitors.ResolveTargets(new[] { missing, secondMonitor });
+            Assert(missingTarget.Count == 1 && missingTarget.ContainsKey(second), "A missing target identity affects only its own display source");
+            Assert(String.IsNullOrEmpty(DisplayConfigMonitors.PreserveIdentitySpelling(missing.Identity, fourthPath)),
+                "An unverifiable display never adopts a stale legacy identity");
+            var clone = new DisplayConfigMonitors.Target(first, fourthPath, "Monitor D");
+            var clonedSource = DisplayConfigMonitors.ResolveTargets(new[] { firstMonitor, clone, secondMonitor });
+            Assert(clonedSource.Count == 1 && clonedSource.ContainsKey(second), "A cloned source with two physical targets is ambiguous");
+            var partialClone = DisplayConfigMonitors.ResolveTargets(new[] { firstMonitor, missing, secondMonitor });
+            Assert(partialClone.Count == 1 && partialClone.ContainsKey(second), "An unreadable clone path cannot turn a multi-target source into a verified match");
+            var repeatedPath = DisplayConfigMonitors.ResolveTargets(new[] { firstMonitor, firstMonitor, secondMonitor });
+            Assert(repeatedPath.Count == 1 && repeatedPath.ContainsKey(second), "Duplicate path rows cannot prove a unique target");
+            var duplicateTarget = new DisplayConfigMonitors.Target(fourth, firstPath.ToUpperInvariant(), "Monitor A");
+            var sharedIdentity = DisplayConfigMonitors.ResolveTargets(new[] { firstMonitor, duplicateTarget, secondMonitor });
+            Assert(sharedIdentity.Count == 1 && sharedIdentity.ContainsKey(second), "The same case-insensitive target identity cannot be assigned to two sources");
+            var sharedCloneIdentity = DisplayConfigMonitors.ResolveTargets(new[] { firstMonitor, clone, duplicateTarget, secondMonitor });
+            Assert(sharedCloneIdentity.Count == 1 && sharedCloneIdentity.ContainsKey(second),
+                "A shared identity is ambiguous even when its other source is cloned");
+            var sameModel = new DisplayConfigMonitors.Target(fourth, fourthPath, "Monitor A");
+            var identicalNames = DisplayConfigMonitors.ResolveTargets(new[] { firstMonitor, sameModel });
+            Assert(identicalNames.Count == 2, "Two monitors with the same friendly name remain distinct by interface identity");
         }
         internal static int RunPinRails()
         {
