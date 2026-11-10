@@ -1,20 +1,20 @@
 # Beta Tester Guide
 
-> **Beta 18 for Windows 11 x64.** Use the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for downloads and exact-build validation.
+> **Beta 19 for Windows 11 x64.** Use the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.19) for downloads and exact-build validation.
 
-Beta 18 fixes app search opening desktop apps on the previous monitor and retains connected-display shortcuts, relative sizing and maximized-move Undo. Download the installer or portable package and matching checksums from the release page. The executable and installer are unsigned. Taskbar Select relies on unsupported Windows taskbar behavior. Save work first and stop if taskbars or windows behave unexpectedly.
+Beta 19 fixes incorrect monitor names after disabling a display in Windows Settings. Download the installer or portable package and matching checksums from the release page. The executable and installer are unsigned. Taskbar Select relies on unsupported Windows taskbar behavior. Save work first and stop if taskbars or windows behave unexpectedly.
 
-See the [testing scope](../TESTING.md), [release notes](../RELEASE_NOTES.md) and [beta 18 release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for candidate evidence. Real mixed-DPI and stacked/disconnected hardware, different-account UAC, prolonged lock/wake, and other PCs remain important gaps.
+See the [testing scope](../TESTING.md), [release notes](../RELEASE_NOTES.md) and [beta 19 release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.19) for candidate evidence. Real mixed-DPI and stacked/disconnected hardware, different-account UAC, prolonged lock/wake, and other PCs remain important gaps.
 
 ## Download and Install
 
-1. Download the beta 18 installer and checksum file from the official release page.
-2. Compare the SHA-256 of **TaskbarSelect-1.0.0-beta.18-Setup.exe** with its matching line in **SHA256SUMS.txt** before running it.
+1. Download the beta 19 installer and checksum file from the official release page.
+2. Compare the SHA-256 of **TaskbarSelect-1.0.0-beta.19-Setup.exe** with its matching line in **SHA256SUMS.txt** before running it.
 3. Use Windows 11 x64, whose included .NET Framework normally needs no extra runtime installation. Run Setup for your Windows user without administrator access, then open **Taskbar Select** from Start. SmartScreen may warn because this build is unsigned; a checksum verifies integrity rather than publisher identity. If it is blocked, stop and check with the person providing the build rather than changing security settings.
 
 Before running Setup or uninstall, turn **Administrator support** Off and approve Windows if requested; wait for confirmed Off. Cancelled or failed removal remains incomplete. Before a fresh-install trial or uninstall, use **Restore and exit**, confirm recovery succeeded and the app stopped, then privately back up `%LOCALAPPDATA%\TaskbarSelect\settings.json` and any **Taskbar Select.lnk** in `shell:startup`. Note the shortcut target and Windows Startup-app state. Uninstall removes saved choices and the owned Startup entry after successful recovery and confirmed approval absence. Stop and keep the app files if recovery fails. The [user guide](USER_GUIDE.md#installing-the-beta) explains backup and returning to those choices.
 
-Upgrades are designed to preserve settings. For a portable trial, verify and extract **TaskbarSelect-1.0.0-beta.18-portable.zip** completely before running the EXE. It shares settings and Startup with the installed app; opening another copy while one is active opens that existing copy. A new folder does not create clean defaults. Use an explicit test profile, a separate Windows user or a test PC for a clean first run without resetting your normal profile. Do not delete recovery files or change Startup simply to test installation.
+Upgrades are designed to preserve settings. For a portable trial, verify and extract **TaskbarSelect-1.0.0-beta.19-portable.zip** completely before running the EXE. It shares settings and Startup with the installed app; opening another copy while one is active opens that existing copy. A new folder does not create clean defaults. Use an explicit test profile, a separate Windows user or a test PC for a clean first run without resetting your normal profile. Do not delete recovery files or change Startup simply to test installation.
 
 For an isolated portable trial, follow the [separate-profile command](USER_GUIDE.md#isolated-portable-trial). The extracted package needs no maintainer launcher. Restore and stop that explicit profile before returning to the installed app.
 
@@ -35,6 +35,10 @@ Taskbar-click movement and Ghost Bar checks are optional; skip steps 2-4 and 7 t
 10. **Optional focus and layout:** Check the binding status under Shortcuts, then try directional focus and the layout picker on disposable windows. Escape/repeated shortcut should cancel; an applied layout should respect usable space and minimum size and be recoverable with Undo when safe.
 11. **Optional appearance:** In Appearance, try Focus frame, both frame styles, lighting and several colors. A fresh profile starts with Forest Green, Muted edge and no lighting; saved choices remain unchanged. Tiles should remain readable, and exactly one color should be selected across all groups. The cue should hide while dragging/resizing and return smoothly. Return these choices to your preferred state.
 12. **Optional administrator support:** only if you want to test administrator windows, enable support in Settings and approve Windows' prompt yourself. Use your usual account and an eligible disposable window; do not alter security settings. On remembers approval for this exact build through app or PC restart; Off stops the helper and removes saved approval, which may require another Windows prompt. A cancellation leaves an incomplete status rather than confirmed Off. The native launcher cache is separate from preferences at `%LOCALAPPDATA%\Temp\TaskbarSelect.Launchers`; the approved managed helper remains in protected Windows Common Application Data. Record whether enable, movement and Undo actually succeeded, then disable support if it is not wanted.
+
+## Optional Beta 19 Check
+
+**Monitor names.** Note the display labels and any saved nicknames. In Windows **Settings > System > Display**, disconnect one secondary display if Windows offers that option. Verify the remaining displays retain their labels and nicknames. Restore the original display mode and confirm the returning display's label and nickname.
 
 ## Optional Beta.18 Checks
 

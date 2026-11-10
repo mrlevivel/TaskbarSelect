@@ -1,6 +1,6 @@
 # Taskbar Select User Guide
 
-> **Beta 18 for Windows 11 x64.** See the [testing scope](../TESTING.md) and [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18) for executed checks and known limitations.
+> **Beta 19 for Windows 11 x64.** See the [testing scope](../TESTING.md) and [release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.19) for executed checks and known limitations.
 
 This guide covers connected-display shortcuts, relative sizing for snapped and floating windows, and maximized-move Undo alongside existing features. Normal launch uses the production profile. The **isolated test** label appears only with an explicit trial profile.
 
@@ -8,15 +8,15 @@ This guide covers connected-display shortcuts, relative sizing for snapped and f
 
 ## Installing the Beta
 
-Download beta 18 from the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18). Choose Setup or the portable package; GitHub's source-code archives contain the project rather than a ready-to-run app.
+Download beta 19 from the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.19). Choose Setup or the portable package; GitHub's source-code archives contain the project rather than a ready-to-run app.
 
-1. Download **TaskbarSelect-1.0.0-beta.18-Setup.exe** and the matching **SHA256SUMS.txt** from that release page.
-2. Compare the installer's SHA-256 with the matching line in `SHA256SUMS.txt`. In PowerShell opened in the download folder, run `Get-FileHash .\TaskbarSelect-1.0.0-beta.18-Setup.exe -Algorithm SHA256`.
+1. Download **TaskbarSelect-1.0.0-beta.19-Setup.exe** and the matching **SHA256SUMS.txt** from that release page.
+2. Compare the installer's SHA-256 with the matching line in `SHA256SUMS.txt`. In PowerShell opened in the download folder, run `Get-FileHash .\TaskbarSelect-1.0.0-beta.19-Setup.exe -Algorithm SHA256`.
 3. Run Setup and keep the default per-user location unless you have a reason to choose another. No administrator access is needed. Open **Taskbar Select** from the Start menu after installation.
 
 Use 64-bit Windows 11. Windows includes the .NET Framework runtime used by Taskbar Select, so a separate runtime installation is normally unnecessary. The app and installer are unsigned; SmartScreen may warn. A matching checksum confirms the download's integrity, not the publisher's identity. If Windows or security software blocks the build, stop and check with the person providing it; do not change security settings to complete this guide.
 
-For a portable trial, verify **TaskbarSelect-1.0.0-beta.18-portable.zip** against the supplied checksum, extract the whole archive into a folder you can keep, and open `TaskbarSelect.exe`. It uses the same Windows-user settings and Startup entry as an installed copy. Before switching copies, use the running app's tray menu **Restore and exit**, then confirm it stopped and taskbars were restored. Closing the settings window leaves it running.
+For a portable trial, verify **TaskbarSelect-1.0.0-beta.19-portable.zip** against the supplied checksum, extract the whole archive into a folder you can keep, and open `TaskbarSelect.exe`. It uses the same Windows-user settings and Startup entry as an installed copy. Before switching copies, use the running app's tray menu **Restore and exit**, then confirm it stopped and taskbars were restored. Closing the settings window leaves it running.
 
 <a id="isolated-beta13-portable-trial"></a>
 
@@ -25,7 +25,7 @@ For a portable trial, verify **TaskbarSelect-1.0.0-beta.18-portable.zip** agains
 After extracting the portable package, use **Restore and exit** in any running Taskbar Select copy. Launch an explicit separate profile from PowerShell in the extracted folder.
 
 ```powershell
-$testProfile = Join-Path $env:LOCALAPPDATA 'TaskbarSelect-beta18-trial'
+$testProfile = Join-Path $env:LOCALAPPDATA 'TaskbarSelect-beta19-trial'
 Start-Process -FilePath (Join-Path $PWD 'TaskbarSelect.exe') -ArgumentList ('--test-profile "{0}"' -f $testProfile)
 ```
 
@@ -53,7 +53,7 @@ Use **Identify** to show the Windows display number on each screen. Select a mon
 
 Monitor labels use the manufacturer and model reported through EDID, falling back to manufacturer/product identifiers when a friendly name is unavailable. **Nickname** adds a local label; press Enter or leave the field to save it. It does not rename the monitor in Windows.
 
-Choices follow physical monitor identity rather than just a display number. Unknown, replaced, or ambiguous monitors default to visible. A cable or GPU-port change can require selecting a monitor again.
+Choices follow physical monitor identity rather than just a display number. Unknown, replaced, or ambiguous monitors default to visible. If Windows cannot identify a unique active monitor, Taskbar Select can show a generic name. A cable or GPU-port change can require selecting a monitor again.
 
 Hidden taskbars release their reserved space. An already-maximized window may need restoring and maximizing again to use it. Explorer can briefly recreate taskbars after display or shell changes; the app periodically rediscovers and manages them.
 
@@ -200,7 +200,7 @@ In-app installation is available only from the verified installed production app
 
 The updater reads published releases through anonymous GitHub access. A private repository is unavailable to it even if your signed-in browser can view that repository; draft releases are not offered as updates. While a build is being reviewed privately, use the reviewed Setup provided by the maintainer. The updater does not use your browser session, ask for a password or accept a GitHub token. See the release page for the exact public-feed and updater validation scope.
 
-See the [beta.18 testing scope](../TESTING.md) for current package and guided-upgrade qualification.
+See the [beta 19 testing scope](../TESTING.md) for current package and guided-upgrade qualification.
 
 ### Uninstall
 

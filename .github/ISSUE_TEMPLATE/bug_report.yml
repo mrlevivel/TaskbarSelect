@@ -10,7 +10,7 @@ body:
   - type: input
     attributes:
       label: Taskbar Select version
-      placeholder: "For example: 1.0.0-beta.18"
+      placeholder: "For example: 1.0.0-beta.19"
     validations:
       required: true
   - type: input
