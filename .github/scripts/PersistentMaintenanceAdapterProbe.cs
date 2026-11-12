@@ -18,7 +18,7 @@ using Microsoft.Win32.SafeHandles;
 internal static class PersistentMaintenanceAdapterProbe
 {
     internal static bool ProductionVersion(string version)
-    { return version == "1.0.0-beta.12" || version == "1.0.0-beta.13" || version == "1.0.0-beta.14" || version == "1.0.0-beta.15" || version == "1.0.0-beta.16" || version == "1.0.0-beta.17" || version == "1.0.0-beta.18" || version == "1.0.0-beta.19"; }
+    { return version == "1.0.0-beta.12" || version == "1.0.0-beta.13" || version == "1.0.0-beta.14" || version == "1.0.0-beta.15" || version == "1.0.0-beta.16" || version == "1.0.0-beta.17" || version == "1.0.0-beta.18" || version == "1.0.0-beta.19" || version == "1.0.0-beta.20"; }
     static readonly BindingFlags Static = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
     static readonly BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     static Type persistent, cacheType, ledgerType;

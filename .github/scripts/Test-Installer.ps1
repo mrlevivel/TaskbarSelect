@@ -100,7 +100,7 @@ Assert-InstallerChecksum -Lines (Get-Content -LiteralPath (Join-Path $repoRoot '
 Check $true 'Setup hash matches distribution checksums'
 $previousVersion = $null; $previousHash = $null
 $baselineSpec = $null
-if ($version -cin @('1.0.0-beta.12', '1.0.0-beta.13', '1.0.0-beta.14', '1.0.0-beta.15', '1.0.0-beta.16', '1.0.0-beta.17', '1.0.0-beta.18', '1.0.0-beta.19')) {
+if ($version -cin @('1.0.0-beta.12', '1.0.0-beta.13', '1.0.0-beta.14', '1.0.0-beta.15', '1.0.0-beta.16', '1.0.0-beta.17', '1.0.0-beta.18', '1.0.0-beta.19', '1.0.0-beta.20')) {
     $baselineSpec = Get-InstallerLifecycleBaseline -Version $version
     if (-not $PreviousInstallerPath) { throw 'Production lifecycle validation requires its exact released predecessor.' }
 }

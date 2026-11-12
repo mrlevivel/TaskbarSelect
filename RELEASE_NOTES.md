@@ -1,15 +1,15 @@
-# Taskbar Select 1.0.0-beta.19
+# Taskbar Select 1.0.0-beta.20
 
 **Windows 11 x64 · Unsigned beta**
 
 ## What changed
 
-- Fix incorrect monitor names after disabling a display in Windows Settings. Taskbar Select now matches each desktop display to its active monitor interface.
-- Keep saved nicknames, taskbar visibility, and Ghost Bar choices with their verified monitor. If Windows reports an ambiguous mapping, Taskbar Select uses a generic monitor label and defers those settings.
+- Add **Start minimized to tray** under **Settings > General**. Turn it on to start in the tray when you open Taskbar Select manually. The switch defaults to Off.
+- Open Settings from the tray icon or by launching Taskbar Select again while it is running. **Start with Windows** continues to launch quietly at sign-in.
 
 ## Install or upgrade
 
-Use **TaskbarSelect-1.0.0-beta.19-Setup.exe** for installation or **TaskbarSelect-1.0.0-beta.19-portable.zip** for a portable copy. Verify the chosen file against **SHA256SUMS.txt**. Windows may warn about unsigned downloads. Keep Windows security protections enabled.
+Use **TaskbarSelect-1.0.0-beta.20-Setup.exe** for installation or **TaskbarSelect-1.0.0-beta.20-portable.zip** for a portable copy. Verify the chosen file against **SHA256SUMS.txt**. Windows may warn about unsigned downloads. Keep Windows security protections enabled.
 
 Installed copies of beta 17 and later can use **Settings > Check for updates**. Before upgrading, turn **Settings > Administrator support** fully **Off** and approve Windows if it asks to remove saved approval. Setup preserves saved preferences and the Startup choice. Enable Administrator support again with fresh Windows approval if you want it for this build.
 

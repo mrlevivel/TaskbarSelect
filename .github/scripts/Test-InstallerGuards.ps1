@@ -134,6 +134,11 @@ Check $true 'The beta.19 release tag is accepted'
 Assert-InstallerSmokeMode -Version '1.0.0-beta.19' -CandidateVersion '1.0.0-beta.19' -Ref 'refs/heads/main' -EventName 'workflow_dispatch'
 Check $true 'The explicit production beta.19 branch candidate is accepted'
 Check ((Get-InstallerPreviousVersion -Filename 'TaskbarSelect-1.0.0-beta.18-Setup.exe' -Version '1.0.0-beta.19') -ceq '1.0.0-beta.18') 'Beta.19 accepts the actual beta.18 predecessor'
+Assert-InstallerSmokeMode -Version '1.0.0-beta.20' -Ref 'refs/tags/v1.0.0-beta.20' -EventName 'push'
+Check $true 'The beta.20 release tag is accepted'
+Assert-InstallerSmokeMode -Version '1.0.0-beta.20' -CandidateVersion '1.0.0-beta.20' -Ref 'refs/heads/main' -EventName 'workflow_dispatch'
+Check $true 'The explicit production beta.20 branch candidate is accepted'
+Check ((Get-InstallerPreviousVersion -Filename 'TaskbarSelect-1.0.0-beta.19-Setup.exe' -Version '1.0.0-beta.20') -ceq '1.0.0-beta.19') 'Beta.20 accepts the actual beta.19 predecessor'
 foreach ($pair in @(
     @{ Current = '1.0.0-beta.12'; Previous = '1.0.0-beta.11'; Directory = 'TaskbarSelect-beta11-baseline'; Setup = '105954c65f0fea42dec5f3be19df43226bc874a41025b3e31eeffb5eefd85c01'; Checksums = '3056e5e803505bcb8c6ac116706d1d16d406d98ddc863ba5782c43721d552b0e' },
     @{ Current = '1.0.0-beta.13'; Previous = '1.0.0-beta.12'; Directory = 'TaskbarSelect-beta12-baseline'; Setup = '7edfb663b07bdf8773302aad28650ffa472ea5538c5937664aaceb6951c4ea68'; Checksums = '5f948f76cf4baf3aa2b649494dd4103deb58cd1d3439d751c857e3f1e2a489ae' },
@@ -142,14 +147,15 @@ foreach ($pair in @(
     @{ Current = '1.0.0-beta.16'; Previous = '1.0.0-beta.15'; Directory = 'TaskbarSelect-beta15-baseline'; Setup = '2f254e952f0c9d21b3822cfd779300252fdbedd675fe2d13a42cc57448e2a2fe'; Checksums = '6aee4790d74345aa1f8584cfae2437f88062f9f641a4930ceea7ab1d7a162890' },
     @{ Current = '1.0.0-beta.17'; Previous = '1.0.0-beta.16'; Directory = 'TaskbarSelect-beta16-baseline'; Setup = 'f8bc6de104f18853a91746b156307f797367d3a55110379a9768a30ae5ae413e'; Checksums = '82c80f4601e70dd495ffdea1efa0e35d9a9de46a6f77bf2ac0d31987023ef7d7' },
     @{ Current = '1.0.0-beta.18'; Previous = '1.0.0-beta.17'; Directory = 'TaskbarSelect-beta17-baseline'; Setup = 'e1d35af6c0d9ca9bc16f537b82d12058bbf8cb9ae1180a83f8b1b4a640350a3d'; Checksums = 'a9bc425be4ac93d3d5a4f6194a29dd2d64be4fb514898c8914e64a35fa4f50a4' },
-    @{ Current = '1.0.0-beta.19'; Previous = '1.0.0-beta.18'; Directory = 'TaskbarSelect-beta18-baseline'; Setup = '0b066ee454e1e5b3b2ba251372c24a773ba288f4e635044b07bf7aeb3531e5f5'; Checksums = '018804cf469ebc657881b1d7185e1ab1adb0d1a8c81ce72398ceca96149261f8' }
+    @{ Current = '1.0.0-beta.19'; Previous = '1.0.0-beta.18'; Directory = 'TaskbarSelect-beta18-baseline'; Setup = '0b066ee454e1e5b3b2ba251372c24a773ba288f4e635044b07bf7aeb3531e5f5'; Checksums = '018804cf469ebc657881b1d7185e1ab1adb0d1a8c81ce72398ceca96149261f8' },
+    @{ Current = '1.0.0-beta.20'; Previous = '1.0.0-beta.19'; Directory = 'TaskbarSelect-beta19-baseline'; Setup = '0e51d38ed30592c03bc51836145467d5de057c00f402acf785ff946da0b59859'; Checksums = '4d7b0c091256f307f3981a798ed776de281817797b35be36e9ad3ad4108b5e01' }
 )) {
     $baseline = Get-InstallerLifecycleBaseline -Version $pair.Current
     Check ($baseline.Version -ceq $pair.Previous -and $baseline.Directory -ceq $pair.Directory -and $baseline.Filename -ceq ('TaskbarSelect-' + $pair.Previous + '-Setup.exe')) 'Production baseline selection binds the exact released predecessor and fixed filenames'
     $releaseTag = if ($pair.Current -ceq '1.0.0-beta.17') { 'ci-upgrade-baseline-beta16' } else { 'v' + $pair.Previous }
     Check ($baseline.ReleaseTag -ceq $releaseTag) 'Each baseline uses only its explicit release tag'
-    if ($pair.Current -ceq '1.0.0-beta.19') {
-        Check ($baseline.PublicReleaseBase -ceq 'https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.18/') 'Beta.19 pins the public beta.18 download independently of the validation repository'
+    if ($pair.Current -cin @('1.0.0-beta.19', '1.0.0-beta.20')) {
+        Check ($baseline.PublicReleaseBase -ceq ('https://github.com/mrlevivel/TaskbarSelect/releases/download/v' + $pair.Previous + '/')) 'The installer gate pins the public predecessor independently of the validation repository'
     } else {
         Check ($null -eq $baseline.PSObject.Properties['PublicReleaseBase']) 'Historical baselines retain their original download policies'
     }
@@ -160,24 +166,24 @@ foreach ($pair in @(
     Reject { Assert-InstallerLifecycleBaseline -Version $pair.Current -PreviousVersion $pair.Previous -SetupHash $pair.Setup -ChecksumsHash ('0' * 64) } 'A different checksum asset is rejected'
 }
 Reject { Assert-InstallerLifecycleBaseline -Version '1.0.0-beta.13' -PreviousVersion '1.0.0-beta.12' -SetupHash '180421485127d0faf393889e35a80ef53cd40a1cc0dae64316e89b2b4e975590' -ChecksumsHash 'cef286c7ad36c5ded6afc82adeadf7a99ec01c3ea5594e9fda19dc9661b61b08' } 'The fixed UNVALIDATED beta.12 diagnostic donor cannot substitute for the published release'
-foreach ($unsupported in @('', '1.0.0-beta.11', '1.0.0-beta.20', '1.0.0-beta.013', '1.0.0-beta.015', '1.0.0-beta.016', '1.0.0-beta.017', '1.0.0-beta.018', '1.0.0-beta.019', '1.0.0-beta.13-test', '1.0.0-beta.14-test', '1.0.0-beta.15-test', '1.0.0-beta.16-test', '1.0.0-beta.17-test', '1.0.0-beta.18-test', '1.0.0-beta.19-test', '1.0.0-beta.15-persistent-test', '1.0.0-BETA.13', '1.0.0-BETA.15', '1.0.0-BETA.16', '1.0.0-BETA.17', '1.0.0-BETA.18', '1.0.0-BETA.19')) {
+foreach ($unsupported in @('', '1.0.0-beta.11', '1.0.0-beta.21', '1.0.0-beta.013', '1.0.0-beta.015', '1.0.0-beta.016', '1.0.0-beta.017', '1.0.0-beta.018', '1.0.0-beta.019', '1.0.0-beta.020', '1.0.0-beta.13-test', '1.0.0-beta.14-test', '1.0.0-beta.15-test', '1.0.0-beta.16-test', '1.0.0-beta.17-test', '1.0.0-beta.18-test', '1.0.0-beta.19-test', '1.0.0-beta.20-test', '1.0.0-beta.15-persistent-test', '1.0.0-BETA.13', '1.0.0-BETA.15', '1.0.0-BETA.16', '1.0.0-BETA.17', '1.0.0-BETA.18', '1.0.0-BETA.19', '1.0.0-BETA.20')) {
     Reject { Get-InstallerLifecycleBaseline -Version $unsupported } 'Unknown, noncanonical and test artifact versions cannot select a production baseline'
 }
 Reject { Assert-InstallerSmokeMode -Version '1.0.0-beta.13' -Ref 'refs/tags/v1.0.0-beta.12' -EventName 'push' } 'The old tag cannot admit beta.13'
 foreach ($version in @('1.0.0-beta.12-persistent-test', '1.0.0-beta.12-fullscreen-test', '1.0.0-beta.13-test')) {
     Reject { Assert-InstallerSmokeMode -Version $version -CandidateVersion $version -Ref 'refs/heads/codex/persistent-admin-support' -EventName 'workflow_dispatch' } 'Test-only builds cannot enter production installer smoke'
 }
-foreach ($previous in @('1.0.0-beta.7', '1.0.0-beta.11', '1.0.0-beta.12', '1.0.0-beta.13', '1.0.0-beta.14', '1.0.0-beta.15', '1.0.0-beta.16', '1.0.0-beta.17', '1.0.0-beta.18', '')) {
+foreach ($previous in @('1.0.0-beta.7', '1.0.0-beta.11', '1.0.0-beta.12', '1.0.0-beta.13', '1.0.0-beta.14', '1.0.0-beta.15', '1.0.0-beta.16', '1.0.0-beta.17', '1.0.0-beta.18', '1.0.0-beta.19', '')) {
     $beforePersistent = [pscustomobject][ordered]@{ PersistentAdministratorSupport = $true; UnrelatedSetting = 'retained' }
     $convertedPersistent = ConvertTo-InstallerPreviousProfile -Profile $beforePersistent -PreviousVersion $previous
-    $expectedPresent = $previous -cin @('1.0.0-beta.12', '1.0.0-beta.13', '1.0.0-beta.14', '1.0.0-beta.15', '1.0.0-beta.16', '1.0.0-beta.17', '1.0.0-beta.18', '')
+    $expectedPresent = $previous -cin @('1.0.0-beta.12', '1.0.0-beta.13', '1.0.0-beta.14', '1.0.0-beta.15', '1.0.0-beta.16', '1.0.0-beta.17', '1.0.0-beta.18', '1.0.0-beta.19', '')
     Check (($convertedPersistent.PSObject.Properties.Name -contains 'PersistentAdministratorSupport') -eq $expectedPresent) 'The predecessor fixture models remembered support only in its actual schema'
     Check ($convertedPersistent.UnrelatedSetting -ceq 'retained') 'Persistent schema projection preserves unrelated preferences'
 }
 Reject { Test-InstallerLegacyPersistentProfile -PreviousVersion '1.0.0-beta.12-persistent-test' } 'Unknown persistent schema markers fail closed'
 $installerRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $standaloneInstaller = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Test-Installer.ps1'))
-Check ($standaloneInstaller -cmatch "if \(\`$version -cin @\('1\.0\.0-beta\.12', '1\.0\.0-beta\.13', '1\.0\.0-beta\.14', '1\.0\.0-beta\.15', '1\.0\.0-beta\.16', '1\.0\.0-beta\.17', '1\.0\.0-beta\.18', '1\.0\.0-beta\.19'\)\) \{\s*\`$baselineSpec = Get-InstallerLifecycleBaseline -Version \`$version") 'The standalone production installer gate also requires the pinned released predecessor'
+Check ($standaloneInstaller -cmatch "if \(\`$version -cin @\('1\.0\.0-beta\.12', '1\.0\.0-beta\.13', '1\.0\.0-beta\.14', '1\.0\.0-beta\.15', '1\.0\.0-beta\.16', '1\.0\.0-beta\.17', '1\.0\.0-beta\.18', '1\.0\.0-beta\.19', '1\.0\.0-beta\.20'\)\) \{\s*\`$baselineSpec = Get-InstallerLifecycleBaseline -Version \`$version") 'The standalone production installer gate also requires the pinned released predecessor'
 $installerSource = [IO.File]::ReadAllText((Join-Path $installerRoot 'installer\installer.iss'))
 $installerPolicy = [IO.File]::ReadAllText((Join-Path $installerRoot 'installer\InstallerLifecycle.iss'))
 Assert-InstallerLifecycleSource -Installer $installerSource -Policy $installerPolicy

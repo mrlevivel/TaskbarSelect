@@ -61,7 +61,14 @@ function Get-InstallerLifecycleBaseline {
                 SetupSha256 = '0b066ee454e1e5b3b2ba251372c24a773ba288f4e635044b07bf7aeb3531e5f5';
                 ChecksumsSha256 = '018804cf469ebc657881b1d7185e1ab1adb0d1a8c81ce72398ceca96149261f8' }
         }
-        default { throw 'The lifecycle gate requires an explicitly supported production beta.12 through beta.19 artifact.' }
+        '1.0.0-beta.20' {
+            return [pscustomobject]@{ Version = '1.0.0-beta.19'; ReleaseTag = 'v1.0.0-beta.19'; Directory = 'TaskbarSelect-beta19-baseline';
+                Filename = 'TaskbarSelect-1.0.0-beta.19-Setup.exe';
+                PublicReleaseBase = 'https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.19/';
+                SetupSha256 = '0e51d38ed30592c03bc51836145467d5de057c00f402acf785ff946da0b59859';
+                ChecksumsSha256 = '4d7b0c091256f307f3981a798ed776de281817797b35be36e9ad3ad4108b5e01' }
+        }
+        default { throw 'The lifecycle gate requires an explicitly supported production beta.12 through beta.20 artifact.' }
     }
 }
 

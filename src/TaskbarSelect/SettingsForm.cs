@@ -554,6 +554,7 @@ namespace TaskbarSelect
         readonly RowStyle setupRowStyle;
         readonly TextBox nickname = new TextBox { BorderStyle = BorderStyle.None, MaxLength = 48 };
         readonly ToggleSwitch showTaskbar = new ToggleSwitch("Show taskbar"), moveWindows = new ToggleSwitch("Bring windows to the taskbar I use"), startup = new ToggleSwitch("Start with Windows");
+        readonly ToggleSwitch startMinimized = new ToggleSwitch("Start minimized to tray");
         readonly ToggleSwitch windowShelf = new ToggleSwitch("Ghost Bar");
         readonly ToggleSwitch allowFullscreen = new ToggleSwitch("Allow moving fullscreen apps");
         ToggleSwitch ownedSnapPrototype;
@@ -828,7 +829,7 @@ namespace TaskbarSelect
             settings.AutoScroll = true;
             var settingsPage = Table(1); settingsPage.Padding = new Padding(16);
             settingsPage.Dock = DockStyle.Top; settingsPage.AutoSize = true; settingsPage.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            settingsPage.RowStyles.Add(new RowStyle(SizeType.Absolute, 220));
+            settingsPage.RowStyles.Add(new RowStyle(SizeType.Absolute, 262));
             settingsPage.RowStyles.Add(new RowStyle(SizeType.Absolute, 44)); settingsPage.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             settingsPage.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
             settingsPage.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); settingsPage.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
@@ -844,14 +845,20 @@ namespace TaskbarSelect
             startupApps.Enabled = !AppProfile.IsTest;
             Describe(startupApps, "Open Windows Startup apps to enable or disable Taskbar Select at sign-in.");
             startupRow.Controls.Add(startupApps, 1, 0);
+            const string startMinimizedHelp = "When Taskbar Select is closed, opening it manually starts it in the system tray. Open Settings from its tray icon or from Start again.";
+            var startMinimizedRow = ToggleRow(startMinimized, CreateInfoMarker("Start minimized to tray", startMinimizedHelp));
+            Describe(startMinimized, startMinimizedHelp);
+            startupRow.Controls.Add(startMinimizedRow, 0, 1);
+            startupRow.SetColumnSpan(startMinimizedRow, 2);
             startupRow.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+            startupRow.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             startupRow.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             startupRow.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
             startupRow.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
             administratorSupport.AccessibleName = "Administrator support";
             Describe(administratorSupport, "Turn on to control administrator windows and remember approval for this build. Turn off to stop support now and remove saved approval. Windows may ask for permission.");
             var administratorRow = ToggleRow(administratorSupport, CreateInfoMarker("Administrator support", AdministratorHelp));
-            startupRow.Controls.Add(administratorRow, 0, 1);
+            startupRow.Controls.Add(administratorRow, 0, 2);
             startupRow.SetColumnSpan(administratorRow, 2);
             administratorSupport.CheckedChanged += delegate {
                 if (administratorReading) return;
@@ -863,12 +870,12 @@ namespace TaskbarSelect
             };
             administratorStatus.AccessibleName = "Administrator support status";
             administratorStatus.AutoEllipsis = false;
-            startupRow.Controls.Add(administratorStatus, 0, 2);
+            startupRow.Controls.Add(administratorStatus, 0, 3);
             startupRow.SetColumnSpan(administratorStatus, 2);
             administratorHelp.AccessibleName = "Administrator support detail";
             administratorHelp.AutoEllipsis = false;
             administratorHelp.ForeColor = Ui.Muted;
-            startupRow.Controls.Add(administratorHelp, 0, 3);
+            startupRow.Controls.Add(administratorHelp, 0, 4);
             startupRow.SetColumnSpan(administratorHelp, 2);
             settingsPage.Controls.Add(startupRow, 0, 0);
             shortcut = Ui.Button("", "keyboard", delegate {
@@ -1024,6 +1031,7 @@ namespace TaskbarSelect
             };
             Deactivate += delegate { active = false; controller.PreviewShelfActivation(false); };
             startup.CheckedChanged += delegate { if (!reading) Run(delegate { controller.ChangeStartup(startup.Checked); saved.Text = "Saved"; }); };
+            startMinimized.CheckedChanged += delegate { if (!reading) Change(s => s.StartMinimizedToTray = startMinimized.Checked, "Start minimized to tray"); };
             Activated += delegate { active = true; ReadStartup(); UpdateStatus(); UpdateActivationPreview(); };
             FormClosing += delegate(object sender, FormClosingEventArgs e) {
                 if (e.CloseReason == CloseReason.UserClosing) { SaveAlias(); e.Cancel = true; Hide(); }
@@ -1059,7 +1067,8 @@ namespace TaskbarSelect
                     int textHeight = TextRenderer.MeasureText(administratorHelp.Text, administratorHelp.Font,
                         new Size(width, Int32.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
                     float required = Math.Max(96 * scale, textHeight + administratorHelp.Margin.Vertical + administratorHelp.Padding.Vertical + (int)Math.Ceiling(4 * scale));
-                    if (layout.RowStyles[3].Height != required) layout.RowStyles[3].Height = required;
+                    var helpRow = layout.RowStyles[layout.GetRow(administratorHelp)];
+                    if (helpRow.Height != required) helpRow.Height = required;
                     float nested = layout.RowStyles.Cast<RowStyle>().Sum(row => row.Height) + layout.Margin.Vertical;
                     var hostRow = content.RowStyles[content.GetRow(layout)];
                     if (hostRow.Height != nested) hostRow.Height = nested;
@@ -1466,6 +1475,7 @@ namespace TaskbarSelect
             shelfActivationWidth.Value = controller.Settings.WindowShelfActivationWidth;
             shelfActivationHeight.Value = controller.Settings.WindowShelfActivationHeight;
             shelfHoverDelay.Value = controller.Settings.WindowShelfHoverDelayMs;
+            startMinimized.Checked = controller.Settings.StartMinimizedToTray;
             ReadStartup();
             exceptions.Items.Clear();
             foreach (var rule in controller.Settings.ExcludedApps.OrderBy(rule => rule.Name)) {

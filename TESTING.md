@@ -1,14 +1,16 @@
 # Testing Taskbar Select
 
-## Beta 19 release qualification
+## Beta 20 release qualification
 
 The Build workflow compiles the application and native broker with warnings as errors, executes the applicable integrated suite, verifies production-profile and lifecycle contracts, and compares the exact eight portable entries to their build inputs.
 
-The installer gate uses a disposable Windows account at genuine Medium integrity. It installs the hash-pinned public beta 18 baseline, checks a running upgrade with synthetic saved preferences and Startup, verifies the exact target executable and registration, exercises recovery and refusal cases, and cleans up its owned installation. The separate administrator boundary exercises the actual protected launch and fixed authorized operations. Interactive UAC, remembered-approval install and uninstall, and reboot are separate physical checks.
+The installer gate uses a disposable Windows account at genuine Medium integrity. It installs the hash-pinned public beta 19 baseline, checks a running upgrade with synthetic saved preferences and Startup, verifies the exact target executable and registration, exercises recovery and refusal cases, and cleans up its owned installation. The separate administrator boundary exercises the actual protected launch and fixed authorized operations. Interactive UAC, remembered-approval install and uninstall, and reboot are separate physical checks.
 
-The baseline uses the exact Setup and checksum files from the [published beta 18 release](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.18), verified against pinned SHA-256 hashes. This installer fixture is separate from the app's update feed.
+The baseline uses the exact Setup and checksum files from the [published beta 19 release](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.19), verified against pinned SHA-256 hashes. This installer fixture is separate from the app's update feed.
 
-Monitor identity tests cover mismatched legacy records, disabled and reconnected monitors, duplicate and incomplete paths, saved nicknames and taskbar preferences, and connected-display shortcuts. The lookup fix was also checked on a four-monitor Windows 11 desktop. During a display disconnect, each remaining screen retained its original name and settings key. All four matched after reconnecting.
+Tray-launch tests cover the default Off value for fresh and older settings, saved switch values, and the Settings control. The Windows launch checks exercise manual starts with the switch Off and On, reopening Settings from a second launch, and the quiet sign-in launch path with both switch values.
+
+Monitor identity tests cover mismatched legacy records, disabled and reconnected monitors, duplicate and incomplete paths, saved nicknames and taskbar preferences, and connected-display shortcuts. The beta 19 lookup fix was also checked on a four-monitor Windows 11 desktop. During a display disconnect, each remaining screen retained its original name and settings key. All four matched after reconnecting.
 
 ## Updater coverage
 

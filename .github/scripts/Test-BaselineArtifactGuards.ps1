@@ -85,7 +85,7 @@ foreach ($version in @('1.0.0-beta.17', '1.0.0-beta.18')) {
         Reject { Admit $version $fixture } 'Altered, unqualified, cross-repository or unbounded baseline metadata is rejected'
     }
 }
-foreach ($unsupported in @('', '1.0.0-beta.16', '1.0.0-beta.19', '1.0.0-beta.018', '1.0.0-beta.18-test', '1.0.0-BETA.18')) {
+foreach ($unsupported in @('', '1.0.0-beta.16', '1.0.0-beta.19', '1.0.0-beta.20', '1.0.0-beta.018', '1.0.0-beta.18-test', '1.0.0-BETA.18')) {
     Reject { Get-BaselineArtifactPolicy $unsupported } 'Unknown or noncanonical versions cannot select an artifact profile'
 }
 $policy17 = Get-BaselineArtifactPolicy '1.0.0-beta.17'

@@ -4,9 +4,9 @@
 
 Choose which monitors show a Windows taskbar, move windows by clicking their taskbar icons on another screen, and use **Ghost Bar** where the taskbar is hidden.
 
-**Beta 19 · Windows 11 x64 · Unsigned downloads**
+**Beta 20 · Windows 11 x64 · Unsigned downloads**
 
-[Download Setup](https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.19/TaskbarSelect-1.0.0-beta.19-Setup.exe) · [Releases and checksums](https://github.com/mrlevivel/TaskbarSelect/releases) · [Watch the demo](#see-it-in-action) · [User guide](docs/USER_GUIDE.md)
+[Download Setup](https://github.com/mrlevivel/TaskbarSelect/releases/download/v1.0.0-beta.20/TaskbarSelect-1.0.0-beta.20-Setup.exe) · [Releases and checksums](https://github.com/mrlevivel/TaskbarSelect/releases) · [Watch the demo](#see-it-in-action) · [User guide](docs/USER_GUIDE.md)
 
 ![Taskbar Select beta 18 display controls with neutral example monitors](docs/images/displays-beta18.png)
 
@@ -28,7 +28,7 @@ The beta 18 overview shows taskbar moves, Ghost Bar, shortcuts, search, layouts 
 
 ## Install and get started
 
-1. Download **Setup** and **SHA256SUMS.txt** from the [beta 19 release](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.19), and compare the installer's SHA-256 with its checksum entry. Run Setup, then open Taskbar Select from Start.
+1. Download **Setup** and **SHA256SUMS.txt** from the [beta 20 release](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.20), and compare the installer's SHA-256 with its checksum entry. Run Setup, then open Taskbar Select from Start.
 2. In Windows **Settings > Personalization > Taskbar > Taskbar behaviors**, enable **Show my taskbar on all displays**.
 3. In Taskbar Select, use **Identify**, select a secondary display and turn **Show taskbar** Off to hide it. Enable **Ghost Bar** there if you want an app switcher at the bottom edge.
 4. Enable **Bring windows to the taskbar I use** to move windows by clicking their icons on another monitor's taskbar.
@@ -67,7 +67,7 @@ These are cropped previews of real controls with neutral demo data. They do not 
 - Mixed scaling, stacked or disconnected displays, prolonged lock/wake, different-account Windows approval and protected apps have limited physical coverage. An app can refuse an operation even with administrator support.
 - Rocket League worked in **Borderless**; exclusive **Fullscreen** resisted monitor moves.
 
-Read the [release notes](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.19) and [testing scope](TESTING.md) for the qualified download's results and limits.
+Read the [release notes](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.20) and [testing scope](TESTING.md) for the qualified download's results and limits.
 
 ## Help and privacy
 

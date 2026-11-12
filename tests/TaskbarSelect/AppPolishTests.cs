@@ -17,6 +17,7 @@ namespace TaskbarSelect
     {
         internal static void Run(Action<bool, string> check)
         {
+            StartMinimizedPreference(check);
             SettingsAndReachability(check);
             SettingsAndReachability(check, new Size(1022, 718));
             NativeTabSelection(check);
@@ -122,6 +123,49 @@ namespace TaskbarSelect
         static bool SameBytes(byte[] previous, byte[] current)
         {
             return previous == null ? current == null : current != null && previous.SequenceEqual(current);
+        }
+        static void StartMinimizedPreference(Action<bool, string> check)
+        {
+            byte[] profileBefore = SettingsBytes();
+            string directory = Path.Combine(Path.GetTempPath(), "TaskbarSelect-tray-launch-" + Guid.NewGuid().ToString("N"));
+            string path = Path.Combine(directory, "settings.json");
+            Directory.CreateDirectory(directory);
+            try {
+                check(!Program.Load(path).StartMinimizedToTray && !File.Exists(path),
+                    "Fresh profiles default tray launch to Off without writing settings");
+                File.WriteAllText(path, "{\"HiddenIdentities\":[\"owned-polish-north\"],\"MoveWindowsToClickedTaskbar\":true}");
+                Settings existing = Program.Load(path);
+                check(!existing.StartMinimizedToTray, "Profiles saved before the tray launch preference default to Off");
+
+                Settings enabled = existing.Copy();
+                enabled.StartMinimizedToTray = true;
+                Program.Save(enabled.Copy(), path);
+                Settings reloaded = Program.Load(path);
+                check(!existing.StartMinimizedToTray && reloaded.StartMinimizedToTray && reloaded.MoveWindowsToClickedTaskbar &&
+                    reloaded.HiddenIdentities.SequenceEqual(existing.HiddenIdentities),
+                    "The tray launch choice survives copy and save without changing existing preferences");
+                Program.Save(existing, path);
+                check(!Program.Load(path).StartMinimizedToTray, "Saving Off after On restores the default tray launch choice");
+
+                var controller = Fixture();
+                try {
+                    foreach (Settings preferences in new[] { existing, reloaded }) {
+                        controller.Settings.StartMinimizedToTray = preferences.StartMinimizedToTray;
+                        using (var form = new SettingsForm(controller)) {
+                            var page = Descendants(form).OfType<TabPage>().Single(tab => tab.Text == "Settings");
+                            var toggle = Descendants(page).OfType<ToggleSwitch>().Single(control => control.Text == "Start minimized to tray");
+                            check(toggle.Checked == preferences.StartMinimizedToTray && toggle.Enabled && toggle.TabStop &&
+                                !String.IsNullOrWhiteSpace(toggle.AccessibleDescription),
+                                "Settings shows the saved tray launch choice as an accessible toggle: " + preferences.StartMinimizedToTray);
+                        }
+                    }
+                } finally { Release(controller); }
+                check(controller.Revision == 0 && SameBytes(profileBefore, SettingsBytes()),
+                    "Binding the tray launch choice in a hidden Settings form leaves the current profile untouched");
+            } finally {
+                File.Delete(path);
+                Directory.Delete(directory);
+            }
         }
         static int[] RenderedArea(Control control, Rectangle area)
         {

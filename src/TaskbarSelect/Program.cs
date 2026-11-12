@@ -19,6 +19,7 @@ namespace TaskbarSelect
         public bool MoveWindowsToClickedTaskbar { get; set; }
         public bool ScaleWindowSizeToMonitor { get; set; }
         public bool AllowMovingFullscreenApps { get; set; }
+        public bool StartMinimizedToTray { get; set; }
         public bool PersistentAdministratorSupport { get; set; }
         public int[] MonitorMoveShortcuts { get; set; }
         public Dictionary<string, int> AdditionalMonitorMoveShortcuts { get; set; }
@@ -1019,7 +1020,7 @@ namespace TaskbarSelect
             focusTimer = new System.Windows.Forms.Timer { Interval = 80 };
             focusTimer.Tick += delegate { controller.PollSnapIntent(); controller.PollOwnedSnapPrototype(); controller.RefreshFocusIndicator(); };
             focusTimer.Start();
-            if (!startQuietly) Open();
+            if (!startQuietly && !controller.Settings.StartMinimizedToTray) Open();
             controller.Mover.HookAvailabilityChanged += delegate {
                 if (exiting) return;
                 Controller.ConfigureMover(controller.Mover, controller.Settings, controller.EffectiveEnabled, controller.MovementPaused);

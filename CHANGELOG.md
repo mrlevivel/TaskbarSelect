@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-beta.20
+
+- Add **Start minimized to tray** for manual launches. It defaults to Off. Launch Taskbar Select again while it is running to open Settings.
+
 ## 1.0.0-beta.19
 
 - Fix duplicate monitor names after disabling a display in Windows Settings by matching each screen to its active monitor interface.
