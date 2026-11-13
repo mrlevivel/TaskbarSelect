@@ -33,7 +33,7 @@ The beta 18 overview shows taskbar moves, Ghost Bar, shortcuts, search, layouts 
 3. In Taskbar Select, use **Identify**, select a secondary display and turn **Show taskbar** Off to hide it. Enable **Ghost Bar** there if you want an app switcher at the bottom edge.
 4. Enable **Bring windows to the taskbar I use** to move windows by clicking their icons on another monitor's taskbar.
 
-**Downloads are unsigned.** Windows protections may warn or block them. Checksums verify file integrity rather than publisher identity. Keep Windows security protections enabled; stop and verify the source or report a problem if blocked.
+**Downloads are unsigned.** Microsoft Defender SmartScreen may show **"Windows protected your PC"** when you open Setup. Use the official release linked above and compare the installer with **SHA256SUMS.txt** to verify file integrity. Keep Windows security protections enabled. If Windows blocks Setup, stop and report the warning.
 
 Setup installs for your Windows user. Windows 11 normally includes the required .NET Framework runtime. A portable ZIP is also available; extract it completely before running. GitHub's **Source code** archives contain the project rather than a ready-to-run app.
 
