@@ -1,11 +1,12 @@
 using System;
 using System.Globalization;
 using System.Threading;
+using System.Windows.Forms;
 
 namespace TaskbarSelect
 {
-    // These exercise presentation arithmetic only: no forms, handles, desktop
-    // state, transport, files, or installation are created or touched.
+    // These exercise presentation logic and logical focus on unshown controls.
+    // They don't activate windows, access transport, or request permissions.
     internal static class AppUpdateUiTests
     {
         internal static void Run(Action<bool, string> check)
@@ -13,6 +14,50 @@ namespace TaskbarSelect
             if (check == null) throw new ArgumentNullException("check");
             Percentages(check);
             TransferText(check);
+            AdministratorMessages(check);
+            AdministratorFocus(check);
+        }
+
+        static void AdministratorFocus(Action<bool, string> check)
+        {
+            using (var host = new ContainerControl())
+            using (var support = new ToggleSwitch("Administrator support"))
+            using (var update = new Button())
+            using (var other = new Button()) {
+                host.Controls.AddRange(new Control[] { support, update, other });
+                host.ActiveControl = support;
+                check(AppUpdateForm.AdministratorFocusTarget(host.ActiveControl, support, true, update) == update,
+                    "Confirmed removal sends focus from the switch to the update action");
+                check(AppUpdateForm.AdministratorFocusTarget(host.ActiveControl, support, false, update) == null &&
+                    host.ActiveControl == support,
+                    "Pending or cancelled removal keeps keyboard focus on the switch");
+                host.ActiveControl = other;
+                check(AppUpdateForm.AdministratorFocusTarget(host.ActiveControl, support, false, update) == null &&
+                    AppUpdateForm.AdministratorFocusTarget(host.ActiveControl, support, true, update) == null &&
+                    host.ActiveControl == other,
+                    "A user's deliberate focus change survives either permission outcome");
+            }
+        }
+
+        static void AdministratorMessages(Action<bool, string> check)
+        {
+            string requirement = AppUpdateInstaller.ApprovalError;
+            check(AppUpdateForm.AdministratorUpdateMessage(requirement, "On", false).StartsWith(requirement) &&
+                AppUpdateForm.AdministratorUpdateMessage(requirement, "On", false).Contains("Windows may ask"),
+                "The update panel explains the Off requirement and possible Windows prompt");
+            check(AppUpdateForm.AdministratorUpdateMessage(requirement, "Turning off", true).Contains("Waiting") &&
+                AppUpdateForm.AdministratorUpdateMessage(requirement, "Off not confirmed", false).Contains("Try again"),
+                "The update panel distinguishes pending and incomplete permission removal");
+            check(AppUpdateForm.AdministratorUpdateMessage(null, "Off", false).Contains("Administrator support is off.") &&
+                AppUpdateForm.AdministratorUpdateMessage(AppUpdateInstaller.ApprovalRemovalError, "Off", false)
+                    .StartsWith(AppUpdateInstaller.ApprovalRemovalError),
+                "The update panel says Off only after approval removal is verified");
+            check(AppUpdateInstaller.IsAdministratorError(requirement) &&
+                AppUpdateInstaller.IsAdministratorError(AppUpdateInstaller.ApprovalCheckError) &&
+                AppUpdateInstaller.IsAdministratorError(AppUpdateInstaller.ApprovalRemovalError) &&
+                !AppUpdateInstaller.IsAdministratorError(AppUpdateInstaller.PortableError) &&
+                !AppUpdateInstaller.IsAdministratorError(null),
+                "Only administrator errors present the removal action and retain the verified update on a blocked launch");
         }
 
         static void Percentages(Action<bool, string> check)

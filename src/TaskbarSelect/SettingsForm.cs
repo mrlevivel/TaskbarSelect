@@ -1490,6 +1490,7 @@ namespace TaskbarSelect
             if (ownedSnapPrototypeStatus != null) ownedSnapPrototypeStatus.Text = controller.OwnedSnapPrototypeStatus;
             RefreshAccentIcon();
             UpdateAdministratorStatus();
+            if (updateForm != null) updateForm.RefreshAdministratorStatus();
             // Hook registration can finish after the initial form population.
             // Refresh availability without repopulating controls or moving focus.
             moveWindows.Enabled = controller.Mover.Available;

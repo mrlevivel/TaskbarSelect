@@ -1,5 +1,11 @@
 # Testing Taskbar Select
 
+## Beta 21 release qualification
+
+- Passed 40,225 application checks and 236 dedicated updater checks. The Ghost Bar focus cases passed. One native shortcut rebind check was skipped because the key combination was already in use.
+- Exercised the update window's Administrator support switch with Windows approval. Canceling kept the verified download available and installation blocked. Approving the change enabled installation.
+- Upgraded a running beta 20 installation through the updater with a controlled test feed. Verified the new executable, saved settings, and Start with Windows choice. The release packages include refreshed documentation and the same tested application executable and installer logic.
+
 ## Beta 20 release qualification
 
 The Build workflow compiles the application and native broker with warnings as errors, executes the applicable integrated suite, verifies production-profile and lifecycle contracts, and compares the exact eight portable entries to their build inputs.

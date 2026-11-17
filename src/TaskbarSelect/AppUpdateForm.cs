@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Windows.Forms.Automation;
 
 namespace TaskbarSelect
 {
@@ -12,19 +13,25 @@ namespace TaskbarSelect
     {
         internal const string OfficialReleases = AppUpdatePolicy.Repository + "/releases";
         internal const string UnsignedNotice = "Downloads are unsigned. Windows may show a security warning.";
-        internal const string AdministratorNotice = "Your settings are kept. Before installing, turn Administrator support Off in Settings and approve Windows if asked. The new version needs fresh administrator approval.";
+        const string SettingsNotice = "Setup keeps your settings.";
         readonly Controller controller;
         readonly AppUpdateService service;
         readonly Label current = Ui.Label(""), state = Ui.Label(""), releaseHeading = Ui.Label("Release notes"), guidance = Ui.Label("");
         readonly TextBox notes = new TextBox();
         readonly ProgressBar progress = new ProgressBar();
         readonly Label progressText = Ui.Label("");
+        readonly Label administratorStatus = Ui.Label("");
         readonly Button check, primary, close, releases;
+        readonly ToggleSwitch administratorSupport = new ToggleSwitch("Administrator support");
+        readonly TableLayoutPanel administratorPanel;
         readonly Icon windowIcon;
         CancellationTokenSource operation;
         AppUpdateRelease release;
         VerifiedAppUpdate verified;
         bool busy, downloading, closing, started;
+        bool requestingAdministratorOff, observedAdministratorOff;
+        bool readingAdministratorSwitch;
+        string administratorBlock;
         int generation;
         readonly string eligibilityError;
 
@@ -70,6 +77,8 @@ namespace TaskbarSelect
             current.AccessibleName = "Installed version"; current.Margin = Padding.Empty;
             root.Controls.Add(current, 0, 1);
             state.AccessibleName = "Update status"; state.AutoEllipsis = false;
+            state.LiveSetting = AutomationLiveSetting.Polite;
+            state.TextChanged += delegate { state.AccessibleName = state.Text; };
             state.AutoSize = true; state.Dock = DockStyle.Top;
             state.Margin = new Padding(0, 8, 0, 12);
             state.Text = "Ready to check for updates.";
@@ -111,14 +120,33 @@ namespace TaskbarSelect
             progressText.TextChanged += delegate { transfer.Visible = progressText.Text.Length > 0; };
 
             var footer = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1, RowCount = 3, Margin = new Padding(0, 12, 0, 0) };
+                ColumnCount = 1, RowCount = 4, Margin = new Padding(0, 12, 0, 0) };
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             footer.RowStyles.Add(new RowStyle(SizeType.AutoSize)); footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             var actionsRow = new RowStyle(SizeType.Absolute, 40); footer.RowStyles.Add(actionsRow);
-            footer.Controls.Add(transfer, 0, 0);
+            administratorPanel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 2,
+                Margin = Padding.Empty, Visible = false, AccessibleName = "Administrator support for updates" };
+            administratorPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            administratorStatus.AccessibleName = "Administrator support update status";
+            administratorStatus.LiveSetting = AutomationLiveSetting.Polite;
+            administratorStatus.AutoEllipsis = false; administratorStatus.AutoSize = true; administratorStatus.Dock = DockStyle.Top;
+            administratorStatus.Margin = new Padding(0, 0, 0, 8);
+            administratorSupport.AccessibleDescription = "Turn off to stop support and remove saved approval. Windows may ask for permission. Use Settings to turn support on.";
+            administratorSupport.Margin = Padding.Empty;
+            administratorSupport.CheckedChanged += delegate {
+                if (readingAdministratorSwitch) return;
+                if (administratorSupport.Checked) RefreshAdministratorStatus();
+                else TurnOffAdministrator();
+            };
+            administratorPanel.Controls.Add(administratorSupport, 0, 0);
+            administratorPanel.Controls.Add(administratorStatus, 0, 1);
+            footer.Controls.Add(administratorPanel, 0, 0);
+            footer.Controls.Add(transfer, 0, 1);
             releases = Ui.Button("View releases on GitHub", null, delegate { OpenReleases(); });
             releases.AccessibleName = "View official GitHub releases"; releases.Margin = new Padding(0, 0, 0, 8);
-            footer.Controls.Add(releases, 0, 1);
+            footer.Controls.Add(releases, 0, 2);
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true,
                 FlowDirection = FlowDirection.RightToLeft, Margin = Padding.Empty, Padding = Padding.Empty };
             close = Ui.Button("Close", null, delegate { if (downloading) CancelDownload(); else Close(); });
@@ -138,11 +166,14 @@ namespace TaskbarSelect
                     if (height > 0 && actionsRow.Height != height) actionsRow.Height = height;
                 } finally { fittingActions = false; }
             };
-            footer.Controls.Add(actions, 0, 2); shell.Controls.Add(footer, 0, 1);
+            footer.Controls.Add(actions, 0, 3); shell.Controls.Add(footer, 0, 1);
             Controls.Add(shell); Ui.Theme(this); ApplyTextColors();
             root.Layout += delegate {
                 int width = Math.Max(1, root.ClientSize.Width - root.Padding.Horizontal);
                 state.MaximumSize = new Size(width, 0); guidance.MaximumSize = new Size(width, 0);
+            };
+            administratorPanel.Layout += delegate {
+                administratorStatus.MaximumSize = new Size(Math.Max(1, administratorPanel.ClientSize.Width), 0);
             };
             CancelButton = close;
             Shown += async delegate {
@@ -178,7 +209,7 @@ namespace TaskbarSelect
 
         async Task CheckForUpdates()
         {
-            if (busy || closing) return;
+            if (busy || closing || requestingAdministratorOff) return;
             ReleaseDownload(); release = null;
             CancellationTokenSource source = BeginOperation(false);
             state.Text = "Checking for updates...";
@@ -194,7 +225,7 @@ namespace TaskbarSelect
                     state.Text = "Version " + release.Version + " is available.";
                     releaseHeading.Text = "What is new in " + release.Version;
                     notes.Text = String.IsNullOrWhiteSpace(release.Notes) ? "No release notes were provided." : release.Notes;
-                    guidance.Text = eligibilityError ?? UnsignedNotice + "\r\n" + AdministratorNotice;
+                    guidance.Text = eligibilityError ?? UnsignedNotice + "\r\n" + SettingsNotice;
                 } else {
                     state.Text = String.IsNullOrWhiteSpace(result.Message) ?
                         (result.Status == AppUpdateCheckStatus.UpToDate ? "You are up to date." : "Updates are unavailable right now. Try again later or visit the official releases page.") : result.Message;
@@ -213,7 +244,7 @@ namespace TaskbarSelect
 
         async Task DownloadUpdate()
         {
-            if (busy || closing || release == null || eligibilityError != null) return;
+            if (busy || closing || requestingAdministratorOff || release == null || eligibilityError != null) return;
             ReleaseDownload();
             CancellationTokenSource source = BeginOperation(true);
             int downloadGeneration = generation;
@@ -235,10 +266,10 @@ namespace TaskbarSelect
                 if (!CanPresent(source)) return;
                 source.Token.ThrowIfCancellationRequested();
                 verified = downloaded; downloaded = null;
-                state.Text = "Version " + verified.Version + " is ready to install.";
+                state.Text = "Version " + verified.Version + " is downloaded and verified.";
                 progress.Value = 100;
                 progressText.Text = "Download verified against the release checksum.";
-                guidance.Text = UnsignedNotice + "\r\n" + AdministratorNotice;
+                guidance.Text = UnsignedNotice + "\r\n" + SettingsNotice;
             } catch (OperationCanceledException) {
                 if (CanPresent(source)) { state.Text = "Download cancelled."; progressText.Text = "You can download the update again."; progress.Visible = false; }
             } catch (AppUpdateException error) {
@@ -289,7 +320,7 @@ namespace TaskbarSelect
         {
             if (busy || closing || verified == null) return;
             string unavailable = AppUpdateInstaller.InstallError(controller);
-            if (!String.IsNullOrEmpty(unavailable)) { state.Text = unavailable; return; }
+            if (unavailable != null) { ShowInstallBlock(unavailable); return; }
             VerifiedAppUpdate pending = verified; verified = null;
             CancellationTokenSource source = BeginOperation(false);
             state.Text = "Checking the installer before opening Setup...";
@@ -298,7 +329,7 @@ namespace TaskbarSelect
                 if (!CanPresent(source)) return;
                 unavailable = AppUpdateInstaller.InstallError(controller);
                 if (!String.IsNullOrEmpty(unavailable)) {
-                    verified = pending; pending = null; state.Text = unavailable; return;
+                    verified = pending; pending = null; ShowInstallBlock(unavailable); return;
                 }
                 DialogResult choice = MessageBox.Show(this,
                     "Install Taskbar Select " + pending.Version + " now?\r\n\r\n" +
@@ -317,9 +348,13 @@ namespace TaskbarSelect
                 Close();
             } catch (AppUpdateException error) {
                 if (CanPresent(source)) {
-                    state.Text = error.Message;
-                    progressText.Text = "If Setup did not open, download the update again.";
-                    progress.Visible = false;
+                    if (AppUpdateInstaller.IsAdministratorError(error.Message)) {
+                        verified = pending; pending = null; ShowInstallBlock(error.Message);
+                    } else {
+                        state.Text = error.Message;
+                        progressText.Text = "If Setup did not open, download the update again.";
+                        progress.Visible = false;
+                    }
                 }
             } catch (Exception) {
                 if (CanPresent(source)) {
@@ -353,13 +388,90 @@ namespace TaskbarSelect
 
         void UpdateActions()
         {
-            check.Enabled = !busy; primary.Enabled = !busy && eligibilityError == null && (release != null || verified != null);
             primary.Text = verified == null ? "Download update" : "Install update";
             primary.AccessibleName = primary.Text;
             close.Text = downloading ? "Cancel download" : "Close";
             close.AccessibleName = close.Text;
             close.Enabled = true; releases.Enabled = !busy;
-            AcceptButton = primary.Enabled ? primary : check.Enabled ? check : null;
+            RefreshAdministratorStatus();
+        }
+
+        internal static string AdministratorUpdateMessage(string block, string status, bool pending)
+        {
+            if (pending) return "Waiting for the Administrator support change to finish. Check for a Windows approval prompt.";
+            if (block == null) return "Administrator support is off. You can turn it on in Settings.";
+            if (status == "Off not confirmed")
+                return "Administrator support must be off to install. Turning it off was not confirmed. Try again.";
+            return block + " Windows may ask you to approve removing this build's saved permission.";
+        }
+
+        internal void RefreshAdministratorStatus()
+        {
+            if (closing || IsDisposed || Disposing) return;
+            var permissions = controller.AdministratorPermissions;
+            bool relevant = eligibilityError == null && release != null;
+            bool pending = relevant && (requestingAdministratorOff || (permissions != null && permissions.Busy));
+            string status = permissions == null ? null : permissions.Status;
+            bool off = relevant && !pending && permissions != null && !permissions.Checked && status == "Off";
+            if (!relevant) administratorBlock = null;
+            else if (!off) administratorBlock = AppUpdateInstaller.ApprovalError;
+            // Only probe the saved registration when the coordinator first
+            // reports Off. The installer rechecks independently at launch.
+            else if (!observedAdministratorOff) administratorBlock = AppUpdateInstaller.AdministratorError(controller);
+            observedAdministratorOff = off;
+
+            bool blocked = relevant && (pending || administratorBlock != null);
+            string message = relevant ? AdministratorUpdateMessage(administratorBlock, status, pending) : "";
+            bool changed = administratorStatus.Text != message;
+            if (changed) {
+                administratorStatus.Text = message;
+                administratorStatus.AccessibleName = message;
+            }
+            administratorPanel.Visible = relevant;
+            check.Enabled = !busy && !pending;
+            primary.Enabled = !busy && !pending && relevant && (verified == null || !blocked);
+            AcceptButton = primary.Enabled ? primary : verified == null && check.Enabled ? check : null;
+            Control next = AdministratorFocusTarget(ActiveControl, administratorSupport, !blocked && primary.Enabled, primary);
+            if (next != null && next.CanSelect) ActiveControl = next;
+            readingAdministratorSwitch = true;
+            try {
+                administratorSupport.Busy = pending;
+                administratorSupport.Checked = blocked;
+                administratorSupport.Enabled = blocked && !busy && permissions != null;
+            } finally { readingAdministratorSwitch = false; }
+            if (changed && administratorPanel.Visible && administratorStatus.IsHandleCreated)
+                administratorStatus.AccessibilityObject.RaiseLiveRegionChanged();
+        }
+
+        internal static Control AdministratorFocusTarget(Control selected, ToggleSwitch support, bool canProceed, Button updateAction)
+        { return selected == support && canProceed ? updateAction : null; }
+
+        void TurnOffAdministrator()
+        {
+            var permissions = controller.AdministratorPermissions;
+            if (closing || busy || requestingAdministratorOff || eligibilityError != null || release == null ||
+                administratorBlock == null || permissions == null || permissions.Busy || !administratorSupport.Enabled) {
+                RefreshAdministratorStatus(); return;
+            }
+            requestingAdministratorOff = true;
+            try {
+                RefreshAdministratorStatus();
+                permissions.Request(false);
+            }
+            finally {
+                requestingAdministratorOff = false;
+                observedAdministratorOff = false;
+                RefreshAdministratorStatus();
+            }
+        }
+
+        void ShowInstallBlock(string reason)
+        {
+            if (AppUpdateInstaller.IsAdministratorError(reason)) {
+                administratorBlock = reason;
+                if (verified != null) state.Text = "Version " + verified.Version + " is downloaded and verified.";
+                RefreshAdministratorStatus();
+            } else state.Text = reason;
         }
 
         void CancelDownload()

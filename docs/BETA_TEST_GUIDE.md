@@ -1,20 +1,20 @@
 # Beta Tester Guide
 
-> **Beta 20 for Windows 11 x64.** Use the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.20) for downloads and exact-build validation.
+> **Beta 21 for Windows 11 x64.** Use the [official release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.21) for downloads and exact-build validation.
 
-Beta 20 adds an optional **Start minimized to tray** switch for manual launches. Download the installer or portable package and matching checksums from the release page. The executable and installer are unsigned. Taskbar Select relies on unsupported Windows taskbar behavior. Save work first and stop if taskbars or windows behave unexpectedly.
+Beta 21 adds an **Administrator support** switch to the update window so you can turn support off before installing an update. Download the installer or portable package and matching checksums from the release page. The executable and installer are unsigned. Taskbar Select relies on unsupported Windows taskbar behavior. Save work first and stop if taskbars or windows behave unexpectedly.
 
-See the [testing scope](../TESTING.md), [release notes](../RELEASE_NOTES.md) and [beta 20 release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.20) for candidate evidence. Real mixed-DPI and stacked/disconnected hardware, different-account UAC, prolonged lock/wake, and other PCs remain important gaps.
+See the [testing scope](../TESTING.md), [release notes](../RELEASE_NOTES.md) and [beta 21 release page](https://github.com/mrlevivel/TaskbarSelect/releases/tag/v1.0.0-beta.21) for candidate evidence. Real mixed-DPI and stacked/disconnected hardware, different-account UAC, prolonged lock/wake, and other PCs remain important gaps.
 
 ## Download and Install
 
-1. Download the beta 20 installer and checksum file from the official release page.
-2. Compare the SHA-256 of **TaskbarSelect-1.0.0-beta.20-Setup.exe** with its matching line in **SHA256SUMS.txt** before running it.
+1. Download the beta 21 installer and checksum file from the official release page.
+2. Compare the SHA-256 of **TaskbarSelect-1.0.0-beta.21-Setup.exe** with its matching line in **SHA256SUMS.txt** before running it.
 3. Use Windows 11 x64, whose included .NET Framework normally needs no extra runtime installation. Run Setup for your Windows user without administrator access, then open **Taskbar Select** from Start. SmartScreen may warn because this build is unsigned; a checksum verifies integrity rather than publisher identity. If it is blocked, stop and check with the person providing the build rather than changing security settings.
 
 Before running Setup or uninstall, turn **Administrator support** Off and approve Windows if requested; wait for confirmed Off. Cancelled or failed removal remains incomplete. Before a fresh-install trial or uninstall, use **Restore and exit**, confirm recovery succeeded and the app stopped, then privately back up `%LOCALAPPDATA%\TaskbarSelect\settings.json` and any **Taskbar Select.lnk** in `shell:startup`. Note the shortcut target and Windows Startup-app state. Uninstall removes saved choices and the owned Startup entry after successful recovery and confirmed approval absence. Stop and keep the app files if recovery fails. The [user guide](USER_GUIDE.md#installing-the-beta) explains backup and returning to those choices.
 
-Upgrades are designed to preserve settings. For a portable trial, verify and extract **TaskbarSelect-1.0.0-beta.20-portable.zip** completely before running the EXE. It shares settings and Startup with the installed app; opening another copy while one is active opens that existing copy. A new folder does not create clean defaults. Use an explicit test profile, a separate Windows user or a test PC for a clean first run without resetting your normal profile. Do not delete recovery files or change Startup simply to test installation.
+Upgrades are designed to preserve settings. For a portable trial, verify and extract **TaskbarSelect-1.0.0-beta.21-portable.zip** completely before running the EXE. It shares settings and Startup with the installed app; opening another copy while one is active opens that existing copy. A new folder does not create clean defaults. Use an explicit test profile, a separate Windows user or a test PC for a clean first run without resetting your normal profile. Do not delete recovery files or change Startup simply to test installation.
 
 For an isolated portable trial, follow the [separate-profile command](USER_GUIDE.md#isolated-portable-trial). The extracted package needs no maintainer launcher. Restore and stop that explicit profile before returning to the installed app.
 
@@ -60,7 +60,7 @@ Report the exact version and observed result. Stop if an action's outcome is unc
 
 Open **Settings > Check for updates**. It should remain responsive while checking and show plain-text release notes or a clear unavailable/up-to-date result. A private repository is unavailable to the anonymous updater even when a signed-in browser can view it, and draft releases are not offered as updates. During a private trial, use the reviewed Setup provided by the maintainer. Do not provide credentials or a GitHub token; the app has no token-based fallback. Closing the update window should cancel pending work without changing preferences or permission settings.
 
-Only when a maintainer supplies a reviewed newer public release and explicitly arranges an upgrade trial: check **Download update**, cancellation and retry, then **Install update** with its separate confirmation. Use the installed production app opened normally; portable, isolated and elevated copies must not start installation. If Administrator support is On or approval is saved, turn its existing Settings switch Off, approve Windows if asked and wait for confirmed Off. Cancelled or failed removal must block installation. After the upgrade, compare saved appearance, monitor, shortcut and Startup choices. A changed build needs fresh administrator approval. Do not uninstall or replace your regular app simply to complete this guide.
+Only when a maintainer supplies a reviewed newer public release and explicitly arranges an upgrade trial: check **Download update**, cancellation and retry, then **Install update** with its separate confirmation. Use the installed production app opened normally; portable, isolated and elevated copies must not start installation. If Administrator support is On or approval is saved, switch **Administrator support** to **Off** in the update window and approve Windows if asked. Check that cancellation leaves the switch On and the download available for retry. Confirm the switch shows Off and installation becomes available after approval. After the upgrade, compare saved appearance, monitor, shortcut and Startup choices. A changed build needs fresh administrator approval. Do not uninstall or replace your regular app simply to complete this guide.
 
 Packages remain unsigned and Windows may warn. See the [testing scope](../TESTING.md) for exact-candidate results.
 

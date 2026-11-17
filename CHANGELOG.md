@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-beta.21
+
+- Add an **Administrator support** switch to the update window. If Windows doesn't confirm that support was turned off, keep the verified download available and offer a retry.
+
 ## 1.0.0-beta.20
 
 - Add **Start minimized to tray** for manual launches. It defaults to Off. Launch Taskbar Select again while it is running to open Settings.

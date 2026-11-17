@@ -14,7 +14,9 @@ namespace TaskbarSelect
     {
         internal const string RegistrationPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{A446A470-529B-42E0-AD2D-D24B31864DFC}_is1";
         internal const string PortableError = "This is a portable copy. Use the release page to update it manually, or open the installed Taskbar Select.";
-        internal const string ApprovalError = "Turn Administrator support Off in Settings and approve Windows if requested. Wait until support is fully Off before installing the update.";
+        internal const string ApprovalError = "Turn off Administrator support before installing this update.";
+        internal const string ApprovalCheckError = "Administrator support and saved approval could not be checked. Try turning off support again.";
+        internal const string ApprovalRemovalError = "Saved administrator approval could not be verified as removed. Try turning off support again.";
         const string VerificationError = "The installed app could not be verified. Use the release page to update it manually.";
 
         internal sealed class EligibilityEvidence
@@ -129,6 +131,11 @@ namespace TaskbarSelect
             if (controller == null) return VerificationError;
             string eligibility = EligibilityError(controller.DesktopRuntime);
             if (eligibility != null) return eligibility;
+            return AdministratorError(controller);
+        }
+
+        internal static string AdministratorError(Controller controller)
+        {
             try {
                 var permissions = controller.AdministratorPermissions;
                 var support = controller.Administrator;
@@ -140,8 +147,11 @@ namespace TaskbarSelect
                     Uncertain = support != null && support.HasUncertainOperation,
                     Remembered = controller.Settings != null && controller.Settings.PersistentAdministratorSupport
                 }, delegate { return PersistentAdministrator.RequiresApprovalRemoval(PersistentAdministrator.ScopeForCurrentProfile()); });
-            } catch (Exception) { return "Administrator support and saved approval could not be checked. Finish recovery or turn support Off before retrying the update."; }
+            } catch (Exception) { return ApprovalCheckError; }
         }
+
+        internal static bool IsAdministratorError(string error)
+        { return error == ApprovalError || error == ApprovalCheckError || error == ApprovalRemovalError; }
 
         internal static string PermissionError(PermissionEvidence evidence, Func<bool> requiresApprovalRemoval)
         {
@@ -149,7 +159,7 @@ namespace TaskbarSelect
             if (evidence.Busy || evidence.Checked || evidence.Active || evidence.Enabling || evidence.Uncertain || evidence.Remembered ||
                 !String.Equals(evidence.Status, "Off", StringComparison.Ordinal)) return ApprovalError;
             try { return requiresApprovalRemoval() ? ApprovalError : null; }
-            catch (Exception) { return "Saved administrator approval could not be verified as removed. Finish turning support Off before installing the update."; }
+            catch (Exception) { return ApprovalRemovalError; }
         }
 
         internal static ProcessStartInfo StartInfo(string path)

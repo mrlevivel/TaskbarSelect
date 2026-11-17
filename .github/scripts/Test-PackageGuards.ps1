@@ -43,6 +43,8 @@ Metadata @{ Version = '1.0.0-beta.19'; InstallerVersion = '1.0.0-beta.19'; Notes
 Check $true 'Aligned beta.19 executable, installer, release notes and tag metadata is accepted'
 Metadata @{ Version = '1.0.0-beta.20'; InstallerVersion = '1.0.0-beta.20'; NotesHeading = '# Taskbar Select 1.0.0-beta.20'; ReleaseTag = 'v1.0.0-beta.20'; FileVersion = '1.0.0.20'; InstallerFileVersion = '1.0.0.20' }
 Check $true 'Aligned beta.20 executable, installer, release notes and tag metadata is accepted'
+Metadata @{ Version = '1.0.0-beta.21'; InstallerVersion = '1.0.0-beta.21'; NotesHeading = '# Taskbar Select 1.0.0-beta.21'; ReleaseTag = 'v1.0.0-beta.21'; FileVersion = '1.0.0.21'; InstallerFileVersion = '1.0.0.21' }
+Check $true 'Aligned beta.21 executable, installer, release notes and tag metadata is accepted'
 foreach ($version in @('1.0.0', '1.0.0-rc.1')) {
     $fileVersion = if ($version -eq '1.0.0') { '1.0.0.0' } else { '1.0.0.1' }
     Metadata @{ Version = $version; InstallerVersion = $version; NotesHeading = "# Taskbar Select $version"; ReleaseTag = "v$version"; FileVersion = $fileVersion; InstallerFileVersion = $fileVersion }

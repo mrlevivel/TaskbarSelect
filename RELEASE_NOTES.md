@@ -1,17 +1,17 @@
-# Taskbar Select 1.0.0-beta.20
+# Taskbar Select 1.0.0-beta.21
 
 **Windows 11 x64 · Unsigned beta**
 
 ## What changed
 
-- Add **Start minimized to tray** under **Settings > General**. Turn it on to start in the tray when you open Taskbar Select manually. The switch defaults to Off.
-- Open Settings from the tray icon or by launching Taskbar Select again while it is running. **Start with Windows** continues to launch quietly at sign-in.
+- The update window explains why Administrator support must be off before installation and includes an Administrator support switch so you can turn it off there.
+- If you cancel the Windows approval prompt, the verified installer stays downloaded and the update window offers a retry.
 
 ## Install or upgrade
 
-Use **TaskbarSelect-1.0.0-beta.20-Setup.exe** for installation or **TaskbarSelect-1.0.0-beta.20-portable.zip** for a portable copy. Verify the chosen file against **SHA256SUMS.txt**. Windows may warn about unsigned downloads. Keep Windows security protections enabled.
+Use **TaskbarSelect-1.0.0-beta.21-Setup.exe** for installation or **TaskbarSelect-1.0.0-beta.21-portable.zip** for a portable copy. Verify the chosen file against **SHA256SUMS.txt**. Windows may warn about unsigned downloads. Keep Windows security protections enabled.
 
-Installed copies of beta 17 and later can use **Settings > Check for updates**. Before upgrading, turn **Settings > Administrator support** fully **Off** and approve Windows if it asks to remove saved approval. Setup preserves saved preferences and the Startup choice. Enable Administrator support again with fresh Windows approval if you want it for this build.
+Installed copies of beta 17 and later can use **Settings > Check for updates**. Before upgrading, turn **Administrator support** fully **Off** and approve Windows if it asks to remove saved approval. Beta 21 also offers this action in the update window. Setup preserves saved preferences and the Startup choice. Enable Administrator support again with fresh Windows approval if you want it for this build.
 
 Portable and isolated copies update manually. Earlier private beta 16 installations need one manual upgrade to move to the public updater address.
 
